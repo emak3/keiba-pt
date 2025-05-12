@@ -8,7 +8,7 @@ class FirebaseClient {
     try {
       // serviceAccountKeyが存在する場合はそれを使用
       const serviceAccountPath = path.join(process.cwd(), 'serviceAccountKey.json');
-      
+
       if (fs.existsSync(serviceAccountPath)) {
         const serviceAccount = require(serviceAccountPath);
         admin.initializeApp({
@@ -20,7 +20,7 @@ class FirebaseClient {
           credential: admin.credential.applicationDefault()
         });
       }
-      
+
       this.db = admin.firestore();
       console.log('Firebaseに接続しました');
     } catch (error) {
@@ -136,20 +136,46 @@ class FirebaseClient {
   // ユーザーの馬券一覧を取得
   async getUserBets(userId) {
     try {
+      // Firestoreのインデックスエラーを回避するためにクエリを変更
       const snapshot = await this.db.collection('bets')
         .where('userId', '==', userId)
-        .orderBy('timestamp', 'desc')
+        // orderByを除去し、アプリケーション側でソートを行う
+        // .orderBy('timestamp', 'desc')
         .get();
-      
+
       const bets = [];
       snapshot.forEach(doc => {
         bets.push(doc.data());
       });
-      
+
       return { success: true, data: bets };
     } catch (error) {
+      // インデックスに関するエラーの場合、特別なメッセージを表示
+      if (error.code === 9 && error.details && error.details.includes('index')) {
+        console.error(`Firestoreインデックスが必要です: ${error.details}`);
+        console.error('このエラーを解決するには、提供されたURLにアクセスしてインデックスを作成してください。');
+        console.error('その間は、アプリケーション側でソートを行います。');
+
+        try {
+          // インデックスなしでクエリを実行
+          const simpleSnapshot = await this.db.collection('bets')
+            .where('userId', '==', userId)
+            .get();
+
+          const bets = [];
+          simpleSnapshot.forEach(doc => {
+            bets.push(doc.data());
+          });
+
+          return { success: true, data: bets };
+        } catch (innerError) {
+          console.error(`シンプルクエリでもエラー (ID: ${userId}):`, innerError);
+          return { success: false, error: innerError, data: [] };
+        }
+      }
+
       console.error(`ユーザー馬券取得エラー (ID: ${userId}):`, error);
-      return { success: false, error };
+      return { success: false, error, data: [] };
     }
   }
 
@@ -160,12 +186,12 @@ class FirebaseClient {
         .where('raceId', '==', raceId)
         .where('status', '==', 'active')
         .get();
-      
+
       const bets = [];
       snapshot.forEach(doc => {
         bets.push(doc.data());
       });
-      
+
       return { success: true, data: bets };
     } catch (error) {
       console.error(`レース馬券取得エラー (ID: ${raceId}):`, error);
@@ -176,8 +202,8 @@ class FirebaseClient {
   // 馬券ステータスを更新
   async updateBetStatus(betId, status, payout = 0) {
     try {
-      await this.db.collection('bets').doc(betId).update({ 
-        status, 
+      await this.db.collection('bets').doc(betId).update({
+        status,
         payout,
         processedAt: admin.firestore.FieldValue.serverTimestamp()
       });
@@ -192,21 +218,21 @@ class FirebaseClient {
   async updateUserPoints(userId, points, totalWinnings = 0) {
     try {
       const userRef = this.db.collection('users').doc(userId);
-      
+
       await this.db.runTransaction(async (transaction) => {
         const doc = await transaction.get(userRef);
         if (!doc.exists) {
           throw new Error('ユーザーが存在しません');
         }
-        
+
         const userData = doc.data();
-        transaction.update(userRef, { 
+        transaction.update(userRef, {
           points: points,
           totalWinnings: userData.totalWinnings + totalWinnings,
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
       });
-      
+
       return { success: true };
     } catch (error) {
       console.error(`ポイント更新エラー (ID: ${userId}):`, error);

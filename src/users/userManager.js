@@ -182,34 +182,57 @@ class UserManager {
 
   // 馬券履歴を取得
   async getBetHistory(userId, limit = 50) {
-    // メモリキャッシュから取得
-    const user = await this.getUser(userId);
-    if (!user || !user.betHistory) {
+    try {
+      // メモリキャッシュから取得
+      const user = await this.getUser(userId);
+      if (!user) {
+        return [];
+      }
+
+      // キャッシュに履歴がある場合
+      if (user.betHistory && Array.isArray(user.betHistory) && user.betHistory.length > 0) {
+        // ソート前に配列であることを確認
+        return user.betHistory
+          .sort((a, b) => {
+            // timestampが日付オブジェクトかどうか確認
+            const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp);
+            const timeB = b.timestamp instanceof Date ? b.timestamp : new Date(b.timestamp);
+            return timeB - timeA; // 降順ソート
+          })
+          .slice(0, limit);
+      }
+
+      // キャッシュになければFirebaseから取得
+      if (this.firebaseClient) {
+        try {
+          const result = await this.firebaseClient.getUserBets(userId);
+          if (result.success && Array.isArray(result.data)) {
+            // メモリキャッシュを更新
+            user.betHistory = result.data;
+
+            // resultがある場合に返す
+            if (result.data.length > 0) {
+              return result.data
+                .sort((a, b) => {
+                  const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp);
+                  const timeB = b.timestamp instanceof Date ? b.timestamp : new Date(b.timestamp);
+                  return timeB - timeA;
+                })
+                .slice(0, limit);
+            }
+          }
+        } catch (error) {
+          console.error(`馬券履歴取得エラー (ID: ${userId}):`, error);
+          // エラーが発生しても処理を継続
+        }
+      }
+
+      // 何も取得できなかった場合は空配列
+      return [];
+    } catch (error) {
+      console.error(`馬券履歴取得処理エラー (ID: ${userId}):`, error);
       return [];
     }
-
-    // キャッシュに履歴があれば返す
-    if (user.betHistory.length > 0) {
-      return user.betHistory
-        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-        .slice(0, limit);
-    }
-
-    // キャッシュになければFirebaseから取得
-    if (this.firebaseClient) {
-      try {
-        const result = await this.firebaseClient.getUserBets(userId);
-        if (result.success) {
-          // メモリキャッシュを更新
-          user.betHistory = result.data;
-          return result.data.slice(0, limit);
-        }
-      } catch (error) {
-        console.error(`馬券履歴取得エラー (ID: ${userId}):`, error);
-      }
-    }
-
-    return [];
   }
 
   // ポイントランキングを取得

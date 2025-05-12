@@ -319,16 +319,34 @@ class NetkeibaClient {
             const jockey = $(element).find('.Jockey a').text().trim();
             const weight = $(element).find('.Weight').text().trim();
 
-            // オッズを正確に取得 - span.Odds_Ninkiから
-            let odds = 999.9; // デフォルト値を999.9に変更
+            // オッズを正確に取得 - 複数のパターンに対応
+            let odds = 999.9;
+
+            // パターン1: span.Odds_Ninki
             const oddsSpan = $(element).find('span.Odds_Ninki');
             if (oddsSpan.length > 0) {
               const oddsText = oddsSpan.text().trim();
-              odds = parseFloat(oddsText) || 999.9;
-            } else {
-              // 従来のオッズ取得方法もバックアップとして残す
-              const oddsText = $(element).find('.Odds').text().trim();
-              odds = parseFloat(oddsText) || 999.9;
+              if (oddsText && !isNaN(parseFloat(oddsText))) {
+                odds = parseFloat(oddsText);
+              }
+            }
+            // パターン2: td.Popular.Txt_R
+            else {
+              const popularTd = $(element).find('td.Popular.Txt_R');
+              if (popularTd.length > 0) {
+                // 最初の数字を取得
+                const oddsText = popularTd.text().trim().split(/\s+/)[0];
+                if (oddsText && !isNaN(parseFloat(oddsText))) {
+                  odds = parseFloat(oddsText);
+                }
+              }
+              // パターン3: 通常のOddsクラス
+              else {
+                const oddsText = $(element).find('.Odds').text().trim();
+                if (oddsText && !isNaN(parseFloat(oddsText))) {
+                  odds = parseFloat(oddsText);
+                }
+              }
             }
 
             // 有効な馬番と馬名があるエントリーのみ追加
@@ -368,15 +386,34 @@ class NetkeibaClient {
           const jockey = $(element).find('.Jockey a').text().trim() ||
             $(element).find('td:nth-child(7) a').text().trim();
 
-          // オッズを正確に取得
-          let odds = 999.9; // デフォルト値を999.9に変更
+          // オッズを正確に取得 - 複数のパターンに対応
+          let odds = 999.9;
+
+          // パターン1: span.Odds_Ninki
           const oddsSpan = $(element).find('span.Odds_Ninki');
           if (oddsSpan.length > 0) {
             const oddsText = oddsSpan.text().trim();
-            odds = parseFloat(oddsText) || 999.9;
-          } else {
-            const oddsText = $(element).find('td:nth-child(10)').text().trim();
-            odds = parseFloat(oddsText) || 999.9;
+            if (oddsText && !isNaN(parseFloat(oddsText))) {
+              odds = parseFloat(oddsText);
+            }
+          }
+          // パターン2: td.Popular.Txt_R
+          else {
+            const popularTd = $(element).find('td.Popular.Txt_R');
+            if (popularTd.length > 0) {
+              // 最初の数字を取得
+              const oddsText = popularTd.text().trim().split(/\s+/)[0];
+              if (oddsText && !isNaN(parseFloat(oddsText))) {
+                odds = parseFloat(oddsText);
+              }
+            }
+            // パターン3: 他のテーブルセル
+            else {
+              const oddsText = $(element).find('td:nth-child(10)').text().trim();
+              if (oddsText && !isNaN(parseFloat(oddsText))) {
+                odds = parseFloat(oddsText);
+              }
+            }
           }
 
           // 有効な馬番と馬名があるエントリーのみ追加
@@ -417,20 +454,37 @@ class NetkeibaClient {
                   jockey = jockeyLink.text().trim();
                 }
 
-                // オッズを探す
-                let odds = 999.9; // デフォルト値を999.9に変更
+                // オッズを探す - 複数のパターンに対応
+                let odds = 999.9;
+
+                // パターン1: span.Odds_Ninki
                 const oddsSpan = parentRow.find('span.Odds_Ninki');
                 if (oddsSpan.length > 0) {
-                  odds = parseFloat(oddsSpan.text().trim()) || 999.9;
-                } else {
-                  // 他の可能性のあるオッズ表示を探す
-                  parentRow.find('td').each((i, cell) => {
-                    const cellText = $(cell).text().trim();
-                    // 数字とドットだけで構成されていてオッズっぽい値を探す
-                    if (/^[\d.]+$/.test(cellText) && parseFloat(cellText) > 1 && parseFloat(cellText) < 1000) {
-                      odds = parseFloat(cellText);
+                  const oddsText = oddsSpan.text().trim();
+                  if (oddsText && !isNaN(parseFloat(oddsText))) {
+                    odds = parseFloat(oddsText);
+                  }
+                }
+                // パターン2: td.Popular.Txt_R
+                else {
+                  const popularTd = parentRow.find('td.Popular.Txt_R');
+                  if (popularTd.length > 0) {
+                    // 最初の数字を取得
+                    const oddsText = popularTd.text().trim().split(/\s+/)[0];
+                    if (oddsText && !isNaN(parseFloat(oddsText))) {
+                      odds = parseFloat(oddsText);
                     }
-                  });
+                  }
+                  // パターン3: 数値のみのセルを探す
+                  else {
+                    parentRow.find('td').each((i, cell) => {
+                      const cellText = $(cell).text().trim();
+                      // 数字とドットだけで構成されていてオッズっぽい値を探す
+                      if (/^[\d.]+$/.test(cellText) && parseFloat(cellText) > 1 && parseFloat(cellText) < 1000) {
+                        odds = parseFloat(cellText);
+                      }
+                    });
+                  }
                 }
 
                 horses.push({
@@ -452,6 +506,20 @@ class NetkeibaClient {
       if (horses.length === 0) {
         console.log('馬名リンクからデータを探します...');
 
+        // すべてのtd.Popular.Txt_Rを見つけてオッズマップを作成
+        const oddsMap = new Map();
+        $('td.Popular.Txt_R').each((_, element) => {
+          const parentRow = $(element).closest('tr');
+          if (parentRow.length > 0) {
+            const oddsText = $(element).text().trim().split(/\s+/)[0];
+            if (oddsText && !isNaN(parseFloat(oddsText))) {
+              // 行番号をキーとしてオッズを保存
+              const rowIndex = parentRow.index();
+              oddsMap.set(rowIndex, parseFloat(oddsText));
+            }
+          }
+        });
+
         // 馬のリンクを探す
         $('a').each((_, element) => {
           const href = $(element).attr('href');
@@ -460,28 +528,38 @@ class NetkeibaClient {
             const horseName = $(element).text().trim();
             if (horseName && horseName.length > 1) {
               // 親要素から馬番を探す
-              const parentElem = $(element).parent().parent();
+              const parentRow = $(element).closest('tr');
               let umaban = '不明';
               let waku = '不明';
-              let odds = 999.9; // デフォルト値を999.9に変更
+              let odds = 999.9;
 
-              // 周囲のテキストから馬番を探す
-              const fullText = parentElem.text();
-              const umabanMatch = fullText.match(/(\d{1,2})\s*番/);
-              if (umabanMatch) {
-                umaban = umabanMatch[1];
-              }
+              if (parentRow.length > 0) {
+                // 行インデックスからオッズを取得
+                const rowIndex = parentRow.index();
+                if (oddsMap.has(rowIndex)) {
+                  odds = oddsMap.get(rowIndex);
+                }
 
-              // オッズを探す（数字+小数点のパターン）
-              const oddsMatch = fullText.match(/(\d+\.\d+)/);
-              if (oddsMatch) {
-                odds = parseFloat(oddsMatch[1]);
-              }
+                // 周囲のテキストから馬番を探す
+                const fullText = parentRow.text();
+                const umabanMatch = fullText.match(/(\d{1,2})\s*番/);
+                if (umabanMatch) {
+                  umaban = umabanMatch[1];
+                } else {
+                  // 馬番っぽい数字を探す
+                  const cells = parentRow.find('td');
+                  if (cells.length > 1) {
+                    // 最初または2番目のセルが馬番である可能性が高い
+                    const firstCellText = $(cells[0]).text().trim();
+                    const secondCellText = $(cells[1]).text().trim();
 
-              // 近くのspan.Odds_Ninkiを探す
-              const oddsSpan = parentElem.find('span.Odds_Ninki');
-              if (oddsSpan.length > 0) {
-                odds = parseFloat(oddsSpan.text().trim()) || odds;
+                    if (/^\d+$/.test(firstCellText) && parseInt(firstCellText) < 30) {
+                      umaban = firstCellText;
+                    } else if (/^\d+$/.test(secondCellText) && parseInt(secondCellText) < 30) {
+                      umaban = secondCellText;
+                    }
+                  }
+                }
               }
 
               horses.push({
