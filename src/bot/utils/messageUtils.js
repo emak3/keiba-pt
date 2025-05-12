@@ -11,23 +11,19 @@ async function showRaceDetail(interaction, raceDetail) {
     .setColor('#0099FF')
     .setTimestamp();
   
-  // 出走馬情報を追加
-  let horseFields = [];
-  
-  for (let i = 0; i < raceDetail.horses.length; i += 5) {
-    const fieldHorses = raceDetail.horses.slice(i, i + 5);
-    const fieldText = fieldHorses
-      .map(horse => `${horse.waku}枠${horse.umaban}番 **${horse.name}** (${horse.jockey}) - ${horse.odds}倍`)
-      .join('\n');
-    
-    horseFields.push(fieldText);
-  }
-  
-  // フィールドの最大数は25個までなので、必要に応じて調整
-  for (let i = 0; i < Math.min(horseFields.length, 5); i++) {
+  // 出走馬情報を追加（改良版）
+  if (raceDetail.horses && raceDetail.horses.length > 0) {
+    // 各馬の情報を整形して１頭ずつ表示
+    raceDetail.horses.forEach(horse => {
+      embed.addFields({
+        name: `${horse.waku}枠${horse.umaban}番 ${horse.name}`,
+        value: `>>> 騎手: ${horse.jockey} / オッズ: ${horse.odds === 999.9 ? '不明' : horse.odds}倍`,
+      });
+    });
+  } else {
     embed.addFields({
-      name: `出走馬 (${i * 5 + 1}-${Math.min((i + 1) * 5, raceDetail.horses.length)})`,
-      value: horseFields[i],
+      name: '出走馬情報',
+      value: '出走馬情報を取得できませんでした。',
       inline: false
     });
   }
