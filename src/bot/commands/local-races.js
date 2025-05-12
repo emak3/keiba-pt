@@ -1,50 +1,30 @@
-// src/bot/commands/races.js
+// src/bot/commands/local-races.js
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('races')
-    .setDescription('本日のレース一覧を表示します。')
+    .setName('local-races')
+    .setDescription('本日の地方競馬レース一覧を表示します。')
     .addStringOption(option => 
       option.setName('track')
         .setDescription('競馬場を指定')
-        .setRequired(false))
-    .addStringOption(option => 
-      option.setName('type')
-        .setDescription('レースタイプを指定')
-        .setRequired(false)
-        .addChoices(
-          { name: 'すべて', value: 'all' },
-          { name: 'JRA', value: 'jra' },
-          { name: '地方競馬', value: 'local' }
-        )),
+        .setRequired(false)),
   
   async execute(interaction, bot) {
     const trackFilter = interaction.options.getString('track');
-    const typeFilter = interaction.options.getString('type') || 'all';
     
-    if (bot.todayRaces.length === 0) {
+    // 地方競馬のレースだけをフィルタリング
+    let races = bot.todayRaces.filter(race => race.type === 'local');
+    
+    if (races.length === 0) {
       return interaction.reply({
-        content: '本日のレース情報はありません。',
+        content: '本日の地方競馬レース情報はありません。',
         ephemeral: true
       });
     }
     
-    // レースタイプでフィルタリング
-    let races = bot.todayRaces;
-    if (typeFilter !== 'all') {
-      races = races.filter(race => race.type === typeFilter);
-      
-      if (races.length === 0) {
-        return interaction.reply({
-          content: `本日の${typeFilter === 'jra' ? 'JRA' : '地方競馬'}レース情報はありません。`,
-          ephemeral: true
-        });
-      }
-    }
-    
-    // 競馬場でフィルタリング（指定がある場合）
+    // 競馬場でさらにフィルタリング（指定がある場合）
     if (trackFilter) {
       races = races.filter(race => 
         race.track.toLowerCase().includes(trackFilter.toLowerCase())
@@ -52,7 +32,7 @@ module.exports = {
       
       if (races.length === 0) {
         return interaction.reply({
-          content: `「${trackFilter}」に一致する競馬場は見つかりませんでした。`,
+          content: `「${trackFilter}」に一致する地方競馬場は見つかりませんでした。`,
           ephemeral: true
         });
       }
@@ -60,30 +40,20 @@ module.exports = {
     
     // 競馬場ごとにレースをグループ化
     const trackGroups = races.reduce((groups, race) => {
-      // グループキーには競馬場名とレースタイプを含める
-      const key = `${race.track}_${race.type}`;
-      if (!groups[key]) {
-        groups[key] = {
-          track: race.track,
-          type: race.type,
-          races: []
-        };
+      if (!groups[race.track]) {
+        groups[race.track] = [];
       }
-      groups[key].races.push(race);
+      groups[race.track].push(race);
       return groups;
     }, {});
     
     const embeds = [];
     
     // 各競馬場ごとにEmbedを作成
-    for (const groupInfo of Object.values(trackGroups)) {
-      const { track, type, races: trackRaces } = groupInfo;
-      const raceTypeLabel = type === 'jra' ? 'JRA' : '地方競馬';
-      const color = type === 'jra' ? '#0099FF' : '#FF9900';
-      
+    for (const [track, trackRaces] of Object.entries(trackGroups)) {
       const embed = new EmbedBuilder()
-        .setTitle(`【${raceTypeLabel}】${track} - 本日のレース`)
-        .setColor(color)
+        .setTitle(`【地方競馬】${track} - 本日のレース`)
+        .setColor('#FF9900') // 地方競馬用の色
         .setTimestamp();
       
       // レース情報を追加
@@ -105,7 +75,7 @@ module.exports = {
         .addComponents(
           new ButtonBuilder()
             .setCustomId(`race_detail_${race.id}`)
-            .setLabel(`${race.type === 'jra' ? 'JRA' : '地方'} ${race.track} ${race.number}R 詳細`)
+            .setLabel(`${race.track} ${race.number}R 詳細`)
             .setStyle(ButtonStyle.Primary)
         );
       

@@ -3,9 +3,11 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelect
 
 // レース詳細表示
 async function showRaceDetail(interaction, raceDetail) {
+  const raceType = raceDetail.type === 'jra' ? 'JRA' : '地方競馬';
+  
   const embed = new EmbedBuilder()
     .setTitle(raceDetail.title)
-    .setDescription(`${raceDetail.courseInfo}\n${raceDetail.raceData}`)
+    .setDescription(`${raceType} - ${raceDetail.courseInfo}\n${raceDetail.raceData}`)
     .setColor('#0099FF')
     .setTimestamp();
   
@@ -45,9 +47,9 @@ async function showRaceDetail(interaction, raceDetail) {
 }
 
 // 馬券タイプ選択メニューの表示
-async function showBetTypeOptions(interaction, raceId) {
+async function showBetTypeOptions(interaction, raceId, raceType = 'jra') {
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`bettype_${raceId}`)
+    .setCustomId(`bettype_${raceId}_${raceType}`)
     .setPlaceholder('馬券の種類を選択してください')
     .addOptions(
       new StringSelectMenuOptionBuilder()
@@ -102,7 +104,7 @@ async function showBetTypeOptions(interaction, raceId) {
 }
 
 // 馬券の購入方法選択メニューの表示
-async function showBetMethodOptions(interaction, raceId, betType) {
+async function showBetMethodOptions(interaction, raceId, betType, raceType = 'jra') {
   const options = [
     new StringSelectMenuOptionBuilder()
       .setLabel('通常')
@@ -128,7 +130,7 @@ async function showBetMethodOptions(interaction, raceId, betType) {
   }
   
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`betmethod_${raceId}_${betType}`)
+    .setCustomId(`betmethod_${raceId}_${betType}_${raceType}`)
     .setPlaceholder('購入方法を選択してください')
     .addOptions(options);
   
@@ -141,12 +143,12 @@ async function showBetMethodOptions(interaction, raceId, betType) {
 }
 
 // 馬番選択メニューの表示
-async function showHorseSelectionMenu(interaction, raceId, betType, method) {
+async function showHorseSelectionMenu(interaction, raceId, betType, method, raceType = 'jra') {
   const bot = interaction.client.bot;
   
   // レース詳細を取得
   if (!bot.raceDetails.has(raceId)) {
-    const details = await bot.netkeibaClient.getRaceDetails(raceId);
+    const details = await bot.netkeibaClient.getRaceDetails(raceId, raceType);
     if (details) {
       bot.raceDetails.set(raceId, details);
     }
@@ -162,16 +164,16 @@ async function showHorseSelectionMenu(interaction, raceId, betType, method) {
   
   // 馬番選択の処理（馬券タイプと購入方法に応じて変更）
   if (method === 'normal') {
-    await showNormalHorseSelection(interaction, raceId, betType, raceDetail);
+    await showNormalHorseSelection(interaction, raceId, betType, raceDetail, raceType);
   } else if (method === 'box') {
-    await showBoxHorseSelection(interaction, raceId, betType, raceDetail);
+    await showBoxHorseSelection(interaction, raceId, betType, raceDetail, raceType);
   } else if (method === 'formation') {
-    await showFormationHorseSelection(interaction, raceId, betType, raceDetail);
+    await showFormationHorseSelection(interaction, raceId, betType, raceDetail, raceType);
   }
 }
 
 // 通常購入時の馬番選択
-async function showNormalHorseSelection(interaction, raceId, betType, raceDetail) {
+async function showNormalHorseSelection(interaction, raceId, betType, raceDetail, raceType = 'jra') {
   // 馬券タイプに応じた選択数
   let selectionCount = 1;
   let title = '馬番を選択してください';
@@ -193,7 +195,7 @@ async function showNormalHorseSelection(interaction, raceId, betType, raceDetail
   );
   
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`horse_normal_${raceId}_${betType}`)
+    .setCustomId(`horse_normal_${raceId}_${betType}_${raceType}`)
     .setPlaceholder('馬番を選択')
     .setMinValues(selectionCount)
     .setMaxValues(selectionCount)
@@ -208,7 +210,7 @@ async function showNormalHorseSelection(interaction, raceId, betType, raceDetail
 }
 
 // ボックス購入時の馬番選択
-async function showBoxHorseSelection(interaction, raceId, betType, raceDetail) {
+async function showBoxHorseSelection(interaction, raceId, betType, raceDetail, raceType = 'jra') {
   // 馬券タイプに応じた選択数
   let minSelections = 2;
   let maxSelections = raceDetail.horses.length;
@@ -230,11 +232,17 @@ async function showBoxHorseSelection(interaction, raceId, betType, raceDetail) {
       .setValue(horse.umaban)
   );
   
+  // Discordの制限: 最大25個のオプション
+  if (options.length > 25) {
+    // ページ分割が必要
+    return handleLargeHorseSelection(interaction, raceId, betType, raceDetail, selectionCount, raceType);
+  }
+  
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`horse_box_${raceId}_${betType}`)
+    .setCustomId(`horse_normal_${raceId}_${betType}_${raceType}`)
     .setPlaceholder('馬番を選択')
-    .setMinValues(minSelections)
-    .setMaxValues(maxSelections > 25 ? 25 : maxSelections) // Discordの制限
+    .setMinValues(selectionCount)
+    .setMaxValues(selectionCount)
     .addOptions(options);
   
   const row = new ActionRowBuilder().addComponents(select);
@@ -246,7 +254,7 @@ async function showBoxHorseSelection(interaction, raceId, betType, raceDetail) {
 }
 
 // フォーメーション購入時の馬番選択
-async function showFormationHorseSelection(interaction, raceId, betType, raceDetail) {
+async function showFormationHorseSelection(interaction, raceId, betType, raceDetail, raceType = 'jra') {
   // フォーメーションの段階（1着、2着、3着）を管理
   const formationSteps = {
     first: {
@@ -272,6 +280,7 @@ async function showFormationHorseSelection(interaction, raceId, betType, raceDet
       step: 'first',
       raceId,
       betType,
+      raceType,
       selections: {
         first: [],
         second: [],
@@ -292,7 +301,7 @@ async function showFormationHorseSelection(interaction, raceId, betType, raceDet
   );
   
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`horse_formation_${raceId}_${betType}_${currentStep}`)
+    .setCustomId(`horse_formation_${raceId}_${betType}_${currentStep}_${raceType}`)
     .setPlaceholder('馬番を選択')
     .setMinValues(1)
     .setMaxValues(options.length > 25 ? 25 : options.length) // Discordの制限
@@ -310,9 +319,9 @@ async function showFormationHorseSelection(interaction, raceId, betType, raceDet
 }
 
 // 金額入力フォームの表示
-async function showAmountInput(interaction, raceId, betType, method, selections) {
+async function showAmountInput(interaction, raceId, betType, method, selections, raceType = 'jra') {
   const modal = new ModalBuilder()
-    .setCustomId(`betamount_${raceId}_${betType}_${method}_${selections}`)
+    .setCustomId(`betamount_${raceId}_${betType}_${method}_${selections}_${raceType}`)
     .setTitle('馬券購入金額');
   
   const amountInput = new TextInputBuilder()
@@ -331,14 +340,20 @@ async function showAmountInput(interaction, raceId, betType, method, selections)
 }
 
 // 馬券購入の確認
-async function confirmBet(interaction, betDetails) {
-  const [raceId, betType, method, selectionsStr, amount] = betDetails.split('_');
+async function confirmBet(interaction, betDetails, bot) {
+  const parts = betDetails.split('_');
+  // raceId, betType, method, selectionsStr, amount, raceType
+  const raceId = parts[0];
+  const betType = parts[1];
+  const method = parts[2];
+  const selectionsStr = parts[3];
+  const amount = parts[4];
+  const raceType = parts[5] || 'jra'; // デフォルトはJRA
   
-  const bot = interaction.client.bot;
   const userId = interaction.user.id;
   
   // ユーザー情報の確認
-  const user = bot.userManager.getUser(userId);
+  const user = await bot.userManager.getUser(userId);
   if (!user) {
     return interaction.reply({
       content: 'あなたはまだ登録されていません。`/register`コマンドで登録してください。',
@@ -375,7 +390,7 @@ async function confirmBet(interaction, betDetails) {
   }
   
   // 馬券の購入
-  const result = bot.betManager.placeBet(
+  const result = await bot.betManager.placeBet(
     userId,
     raceId,
     betType,
@@ -386,20 +401,20 @@ async function confirmBet(interaction, betDetails) {
   
   if (result.success) {
     // ポイントを減算
-    bot.userManager.updatePoints(userId, -amountValue);
+    await bot.userManager.updatePoints(userId, -amountValue);
     
-    // 馬券履歴に追加
-    bot.userManager.addBetHistory(userId, result.bet);
+    // 馬券履歴に追加（デフォルトで追加されるため不要）
     
     // レース情報
     const race = bot.todayRaces.find(r => r.id === raceId);
     const raceInfo = race 
       ? `${race.track} ${race.number}R ${race.name}` 
       : 'レース不明';
+    const raceTypeDisplay = raceType === 'jra' ? 'JRA' : '地方競馬';
     
     const embed = new EmbedBuilder()
       .setTitle('馬券購入完了')
-      .setDescription(`${raceInfo}`)
+      .setDescription(`${raceTypeDisplay} - ${raceInfo}`)
       .addFields(
         { name: '馬券タイプ', value: getBetTypeDisplay(betType) },
         { name: '購入方法', value: getBetMethodDisplay(method) },
@@ -465,6 +480,121 @@ function formatSelections(selections) {
       : selections;
   }
 }
+// 多すぎる馬番選択のページ分割処理
+async function handleLargeHorseSelection(interaction, raceId, betType, raceDetail, selectionCount, raceType = 'jra') {
+  // 馬をページ分割（最大25頭ずつ）
+  const horses = raceDetail.horses;
+  const page = parseInt(interaction.customId.split('_').pop()) || 1;
+  const pageSize = 25;
+  const totalPages = Math.ceil(horses.length / pageSize);
+  const startIdx = (page - 1) * pageSize;
+  const endIdx = Math.min(startIdx + pageSize, horses.length);
+  const currentPageHorses = horses.slice(startIdx, endIdx);
+  
+  // 現在のページの馬番選択メニューを作成
+  const options = currentPageHorses.map(horse => 
+    new StringSelectMenuOptionBuilder()
+      .setLabel(`${horse.umaban}番 ${horse.name}`)
+      .setDescription(`${horse.jockey} - オッズ: ${horse.odds}倍`)
+      .setValue(horse.umaban)
+  );
+  
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`horse_normal_${raceId}_${betType}_${raceType}_${page}`)
+    .setPlaceholder('馬番を選択')
+    .setMinValues(selectionCount)
+    .setMaxValues(selectionCount)
+    .addOptions(options);
+  
+  const row = new ActionRowBuilder().addComponents(select);
+  
+  // ページ切り替えボタンを追加
+  const buttons = [];
+  
+  if (page > 1) {
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(`page_prev_${raceId}_${betType}_${selectionCount}_${page-1}_${raceType}`)
+        .setLabel('←前のページ')
+        .setStyle(ButtonStyle.Secondary)
+    );
+  }
+  
+  if (page < totalPages) {
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(`page_next_${raceId}_${betType}_${selectionCount}_${page+1}_${raceType}`)
+        .setLabel('次のページ→')
+        .setStyle(ButtonStyle.Secondary)
+    );
+  }
+  
+  const buttonRow = new ActionRowBuilder().addComponents(buttons);
+  
+  const components = [row];
+  if (buttons.length > 0) {
+    components.push(buttonRow);
+  }
+  
+  await interaction.update({
+    content: `馬番を選択してください (${page}/${totalPages}ページ目)`,
+    components: components
+  });
+}
+
+// レースの発走時刻をチェックし、購入可能かを判定
+function isRaceBettingAvailable(race) {
+  if (!race || race.status === '確定') {
+    return false;
+  }
+  
+  // レースの時間情報がない場合
+  if (!race.time) {
+    return true; // 時間情報がない場合は許可
+  }
+  
+  // 現在時刻の取得
+  const now = new Date();
+  
+  // レース時間のパース (例: "10:30")
+  const timeMatch = race.time.match(/(\d+):(\d+)/);
+  if (!timeMatch) {
+    return true; // 時間形式が不明な場合は許可
+  }
+  
+  // レース時間の設定
+  const raceTime = new Date();
+  raceTime.setHours(parseInt(timeMatch[1]));
+  raceTime.setMinutes(parseInt(timeMatch[2]));
+  raceTime.setSeconds(0);
+  
+  // 発走2分前を計算
+  const cutoffTime = new Date(raceTime);
+  cutoffTime.setMinutes(raceTime.getMinutes() - 2);
+  
+  // 現在時刻と発走2分前を比較
+  return now < cutoffTime;
+}
+
+// 選択馬の表示用フォーマット
+function formatSelections(selections) {
+  if (typeof selections === 'object' && !Array.isArray(selections)) {
+    // フォーメーション
+    const { first, second, third } = selections;
+    let text = `1着: ${first.join(',')} - 2着: ${second.join(',')}`;
+    
+    if (third && third.length > 0) {
+      text += ` - 3着: ${third.join(',')}`;
+    }
+    
+    return text;
+  } else {
+    // 通常・ボックス
+    return Array.isArray(selections) 
+      ? selections.join(',') 
+      : selections;
+  }
+}
 
 module.exports = {
   showRaceDetail,
@@ -475,5 +605,6 @@ module.exports = {
   confirmBet,
   getBetTypeDisplay,
   getBetMethodDisplay,
-  formatSelections
+  formatSelections,
+  isRaceBettingAvailable
 };

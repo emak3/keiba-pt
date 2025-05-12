@@ -4,23 +4,45 @@ const messageUtils = require('../utils/messageUtils');
 
 // 馬券タイプ選択の処理
 async function handleBetTypeSelection(interaction, args) {
-  const [raceId] = args;
+  const [raceId, raceType] = args;
   const betType = interaction.values[0];
   
-  await messageUtils.showBetMethodOptions(interaction, raceId, betType);
+  await messageUtils.showBetMethodOptions(interaction, raceId, betType, raceType);
 }
 
 // 購入方法選択の処理
 async function handleBetMethodSelection(interaction, args) {
-  const [raceId, betType] = args;
+  const [raceId, betType, raceType] = args;
   const method = interaction.values[0];
   
-  await messageUtils.showHorseSelectionMenu(interaction, raceId, betType, method);
+  await messageUtils.showHorseSelectionMenu(interaction, raceId, betType, method, raceType);
 }
 
 // 馬番選択の処理
 async function handleHorseSelection(interaction, args) {
-  const [selectionType, raceId, betType, step] = args;
+  let selectionType, raceId, betType, step, raceType;
+  
+  if (args.length === 3) {
+    // 通常/ボックス形式: [selectionType, raceId, betType]
+    [selectionType, raceId, betType] = args;
+    raceType = 'jra'; // デフォルトはJRA
+  } else if (args.length === 4 && ['normal', 'box'].includes(args[0])) {
+    // 通常/ボックス形式: [selectionType, raceId, betType, raceType]
+    [selectionType, raceId, betType, raceType] = args;
+  } else if (args.length === 4 && args[0] === 'formation') {
+    // フォーメーション形式: [selectionType, raceId, betType, step]
+    [selectionType, raceId, betType, step] = args;
+    raceType = 'jra'; // デフォルトはJRA
+  } else if (args.length === 5) {
+    // フォーメーション形式: [selectionType, raceId, betType, step, raceType]
+    [selectionType, raceId, betType, step, raceType] = args;
+  } else {
+    return interaction.update({
+      content: 'エラーが発生しました。最初からやり直してください。',
+      components: []
+    });
+  }
+  
   const selectedValues = interaction.values;
   
   if (selectionType === 'normal' || selectionType === 'box') {
@@ -30,7 +52,8 @@ async function handleHorseSelection(interaction, args) {
       raceId, 
       betType, 
       selectionType, 
-      selectedValues.join(',')
+      selectedValues.join(','),
+      raceType
     );
   } else if (selectionType === 'formation') {
     // フォーメーションの場合は段階ごとに処理
@@ -54,7 +77,8 @@ async function handleHorseSelection(interaction, args) {
         interaction, 
         raceId, 
         betType, 
-        'formation'
+        'formation',
+        raceType
       );
     } else if (step === 'second') {
       if (['sanrenpuku', 'sanrentan'].includes(betType)) {
@@ -63,7 +87,8 @@ async function handleHorseSelection(interaction, args) {
           interaction, 
           raceId, 
           betType, 
-          'formation'
+          'formation',
+          raceType
         );
       } else {
         // 2着までの選択で完了する場合
@@ -73,7 +98,8 @@ async function handleHorseSelection(interaction, args) {
           raceId, 
           betType, 
           'formation', 
-          selectionsStr
+          selectionsStr,
+          raceType
         );
       }
     } else if (step === 'third') {
@@ -84,7 +110,8 @@ async function handleHorseSelection(interaction, args) {
         raceId, 
         betType, 
         'formation', 
-        selectionsStr
+        selectionsStr,
+        raceType
       );
     }
     
@@ -95,7 +122,13 @@ async function handleHorseSelection(interaction, args) {
 
 // 金額入力の処理
 async function handleBetAmountSubmit(interaction, args) {
-  const [raceId, betType, method, selectionsStr] = args;
+  // [raceId, betType, method, selectionsStr, raceType]
+  const raceId = args[0];
+  const betType = args[1];
+  const method = args[2];
+  const selectionsStr = args[3];
+  const raceType = args.length > 4 ? args[4] : 'jra'; // デフォルトはJRA
+  
   const amount = interaction.fields.getTextInputValue('amount');
   
   // 金額のバリデーション
@@ -111,7 +144,8 @@ async function handleBetAmountSubmit(interaction, args) {
   // 購入確認
   await messageUtils.confirmBet(
     interaction, 
-    `${raceId}_${betType}_${method}_${selectionsStr}_${amountValue}`
+    `${raceId}_${betType}_${method}_${selectionsStr}_${amountValue}_${raceType}`,
+    interaction.client.bot
   );
 }
 

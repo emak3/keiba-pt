@@ -1,6 +1,6 @@
 // src/bot/index.js
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const path = require('path');
 const fs = require('fs');
 
@@ -8,6 +8,9 @@ const fs = require('fs');
 const NetkeibaClient = require('../scrapers/netkeibaClient');
 const BetManager = require('../betting/betManager');
 const UserManager = require('../users/userManager');
+const FirebaseClient = require('../database/firebaseClient');
+const messageUtils = require('./utils/messageUtils');
+const betHandlers = require('./handlers/betHandlers');
 
 class RaceBot {
     constructor() {
@@ -25,10 +28,19 @@ class RaceBot {
         this.commands = new Collection();
         this.cooldowns = new Collection();
 
+        // データベース接続
+        try {
+            this.firebaseClient = new FirebaseClient();
+            console.log('Firebaseに接続しました');
+        } catch (error) {
+            console.error('Firebase接続エラー:', error);
+            this.firebaseClient = null;
+        }
+
         // 各モジュールのインスタンス化
         this.netkeibaClient = new NetkeibaClient();
-        this.betManager = new BetManager();
-        this.userManager = new UserManager();
+        this.betManager = new BetManager(this.firebaseClient);
+        this.userManager = new UserManager(this.firebaseClient);
 
         // レース情報を保持
         this.todayRaces = [];
@@ -65,12 +77,15 @@ class RaceBot {
     // Readyイベントハンドラ
     async onReady() {
         console.log(`${this.client.user.tag} が起動しました！`);
+        
+        // クライアントインスタンスを設定 (メッセージユーティリティとハンドラーで使用)
+        this.client.bot = this;
 
         // 当日のレース情報を取得
         await this.updateRaceData();
 
-        // 定期的にレース情報を更新（1時間ごと）
-        setInterval(this.updateRaceData.bind(this), 60 * 60 * 1000);
+        // 定期的にレース情報を更新（30分ごと）
+        setInterval(this.updateRaceData.bind(this), 30 * 60 * 1000);
 
         // レース結果の監視を開始
         this.netkeibaClient.startResultsMonitoring(
@@ -82,8 +97,29 @@ class RaceBot {
     // レース情報の更新
     async updateRaceData() {
         try {
-            this.todayRaces = await this.netkeibaClient.getTodayRaces();
-            console.log(`${this.todayRaces.length} レースの情報を取得しました。`);
+            // 新しいレース情報を取得
+            const races = await this.netkeibaClient.getTodayRaces();
+            
+            // 既存レースの状態を維持しつつ更新
+            if (this.todayRaces.length > 0) {
+                races.forEach(race => {
+                    const existingRace = this.todayRaces.find(r => r.id === race.id);
+                    if (existingRace) {
+                        race.status = existingRace.status; // 既存の状態を維持
+                    }
+                });
+            }
+            
+            this.todayRaces = races;
+            
+            // Firebaseにレース情報を保存
+            if (this.firebaseClient) {
+                const today = new Date();
+                const dateKey = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+                await this.firebaseClient.saveTodayRaces(dateKey, races);
+            }
+            
+            console.log(`${this.todayRaces.length} レースの情報を取得しました。（JRA + 地方競馬）`);
         } catch (error) {
             console.error('レース情報の更新に失敗しました:', error);
         }
@@ -94,26 +130,26 @@ class RaceBot {
         console.log(`レース ID: ${raceId} の結果を処理しています...`);
 
         // 馬券の結果を処理
-        const processedBets = this.betManager.processBetResult(raceId, result);
+        const processedBets = await this.betManager.processBetResult(raceId, result);
 
         // ユーザーに払戻を行う
         for (const bet of processedBets) {
             if (bet.won) {
                 // ポイントを更新
-                this.userManager.updatePoints(bet.userId, bet.payout);
+                await this.userManager.updatePoints(bet.userId, bet.payout);
 
                 // 結果を通知
-                this.notifyBetResult(bet);
+                await this.notifyBetResult(bet);
             }
         }
 
         // レース結果を全体に通知
-        this.broadcastRaceResult(raceId, result);
+        await this.broadcastRaceResult(raceId, result);
     }
 
     // 馬券結果の通知
     async notifyBetResult(bet) {
-        const user = this.userManager.getUser(bet.userId);
+        const user = await this.userManager.getUser(bet.userId);
         if (!user) return;
 
         try {
@@ -144,6 +180,7 @@ class RaceBot {
         if (!race) return;
 
         const raceInfo = `${race.track} ${race.number}R ${race.name}`;
+        const raceType = race.type === 'jra' ? 'JRA' : '地方競馬';
 
         // 通知チャンネルIDは環境変数から取得
         const channelId = process.env.RESULT_CHANNEL_ID;
@@ -155,7 +192,7 @@ class RaceBot {
 
             const embed = new EmbedBuilder()
                 .setTitle(`🏁 レース結果: ${raceInfo}`)
-                .setDescription('馬券の払戻金が確定しました。')
+                .setDescription(`${raceType}の馬券の払戻金が確定しました。`)
                 .setColor('#0099FF')
                 .setTimestamp();
 
@@ -173,7 +210,7 @@ class RaceBot {
                 embed.addFields(field);
             }
 
-            channel.send({ embeds: [embed] });
+            await channel.send({ embeds: [embed] });
         } catch (error) {
             console.error(`レース結果の通知に失敗しました: ${error}`);
         }
@@ -281,12 +318,15 @@ class RaceBot {
     // レース関連ボタンの処理
     async handleRaceButton(interaction, args) {
         const [action, raceId] = args;
+        // レースタイプを取得（デフォルトはJRA）
+        const race = this.todayRaces.find(r => r.id === raceId);
+        const raceType = race ? race.type : 'jra';
 
         switch (action) {
             case 'detail':
                 // レース詳細を表示
                 if (!this.raceDetails.has(raceId)) {
-                    const details = await this.netkeibaClient.getRaceDetails(raceId);
+                    const details = await this.netkeibaClient.getRaceDetails(raceId, raceType);
                     if (details) {
                         this.raceDetails.set(raceId, details);
                     }
@@ -294,7 +334,7 @@ class RaceBot {
 
                 const raceDetail = this.raceDetails.get(raceId);
                 if (raceDetail) {
-                    await this.showRaceDetail(interaction, raceDetail);
+                    await messageUtils.showRaceDetail(interaction, raceDetail);
                 } else {
                     await interaction.reply({
                         content: 'レース情報を取得できませんでした。',
@@ -304,8 +344,16 @@ class RaceBot {
                 break;
 
             case 'bet':
+                // 発走時刻のチェック
+                if (race && !messageUtils.isRaceBettingAvailable(race)) {
+                    return interaction.reply({
+                        content: `このレースは発走時刻（${race.time}）の2分前を過ぎているため、馬券の購入ができません。`,
+                        ephemeral: true
+                    });
+                }
+                
                 // 馬券購入画面を表示
-                await this.showBetMenu(interaction, raceId);
+                await messageUtils.showBetTypeOptions(interaction, raceId, raceType);
                 break;
 
             default:
@@ -316,42 +364,113 @@ class RaceBot {
         }
     }
 
-    // 馬券関連ボタンの処理
-    async handleBetButton(interaction, args) {
-        const [action, raceId, betType] = args;
+    // ボタン処理
+    async handleButton(interaction) {
+        const [type, ...args] = interaction.customId.split('_');
 
-        switch (action) {
-            case 'type':
-                // 馬券タイプの選択
-                await this.showBetTypeOptions(interaction, raceId);
-                break;
-
-            case 'method':
-                // 購入方法の選択
-                await this.showBetMethodOptions(interaction, raceId, betType);
-                break;
-
-            case 'select':
-                // 馬番選択
-                await this.showHorseSelectionMenu(interaction, raceId, betType, args[3]);
-                break;
-
-            case 'amount':
-                // 金額入力
-                await this.showAmountInput(interaction, raceId, betType, args[3], args[4]);
-                break;
-
-            case 'confirm':
-                // 購入確認
-                await this.confirmBet(interaction, args.slice(1).join('_'));
-                break;
-
-            default:
-                await interaction.reply({
-                    content: '無効な操作です。',
-                    ephemeral: true
-                });
+        try {
+            switch (type) {
+                case 'race':
+                    await this.handleRaceButton(interaction, args);
+                    break;
+                case 'bet':
+                    await this.handleBetButton(interaction, args);
+                    break;
+                case 'page':
+                    await this.handlePageButton(interaction, args);
+                    break;
+                default:
+                    await interaction.reply({
+                        content: '無効なボタンです。',
+                        ephemeral: true
+                    });
+            }
+        } catch (error) {
+            console.error(`ボタン処理中にエラーが発生しました: ${error}`);
+            await interaction.reply({
+                content: 'エラーが発生しました。',
+                ephemeral: true
+            });
         }
+    }
+    
+    // ページングボタンの処理
+    async handlePageButton(interaction, args) {
+        const [direction, raceId, betType, selectionCount, page, raceType] = args;
+        
+        // レース情報取得
+        if (!this.raceDetails.has(raceId)) {
+            const details = await this.netkeibaClient.getRaceDetails(raceId, raceType);
+            if (details) {
+                this.raceDetails.set(raceId, details);
+            }
+        }
+        
+        const raceDetail = this.raceDetails.get(raceId);
+        if (!raceDetail) {
+            return interaction.reply({
+                content: 'レース情報を取得できませんでした。',
+                ephemeral: true
+            });
+        }
+        
+        // 馬番選択メニューの再表示（別ページ）
+        const horses = raceDetail.horses;
+        const pageNum = parseInt(page);
+        const pageSize = 25;
+        const totalPages = Math.ceil(horses.length / pageSize);
+        const startIdx = (pageNum - 1) * pageSize;
+        const endIdx = Math.min(startIdx + pageSize, horses.length);
+        const currentPageHorses = horses.slice(startIdx, endIdx);
+        
+        // 現在のページの馬番選択メニューを作成
+        const options = currentPageHorses.map(horse => 
+            new StringSelectMenuOptionBuilder()
+                .setLabel(`${horse.umaban}番 ${horse.name}`)
+                .setDescription(`${horse.jockey} - オッズ: ${horse.odds}倍`)
+                .setValue(horse.umaban)
+        );
+        
+        const select = new StringSelectMenuBuilder()
+            .setCustomId(`horse_normal_${raceId}_${betType}_${raceType}_${pageNum}`)
+            .setPlaceholder('馬番を選択')
+            .setMinValues(parseInt(selectionCount))
+            .setMaxValues(parseInt(selectionCount))
+            .addOptions(options);
+        
+        const row = new ActionRowBuilder().addComponents(select);
+        
+        // ページ切り替えボタンを追加
+        const buttons = [];
+        
+        if (pageNum > 1) {
+            buttons.push(
+                new ButtonBuilder()
+                    .setCustomId(`page_prev_${raceId}_${betType}_${selectionCount}_${pageNum-1}_${raceType}`)
+                    .setLabel('←前のページ')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+        }
+        
+        if (pageNum < totalPages) {
+            buttons.push(
+                new ButtonBuilder()
+                    .setCustomId(`page_next_${raceId}_${betType}_${selectionCount}_${pageNum+1}_${raceType}`)
+                    .setLabel('次のページ→')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+        }
+        
+        const components = [row];
+        if (buttons.length > 0) {
+            const buttonRow = new ActionRowBuilder().addComponents(buttons);
+            components.push(buttonRow);
+        }
+        
+        await interaction.update({
+            content: `馬番を選択してください (${pageNum}/${totalPages}ページ目)`,
+            components: components
+        });
     }
 
     // セレクトメニュー処理
@@ -362,17 +481,17 @@ class RaceBot {
             switch (type) {
                 case 'bettype':
                     // 馬券タイプの選択処理
-                    await this.handleBetTypeSelection(interaction, args);
+                    await betHandlers.handleBetTypeSelection(interaction, args);
                     break;
 
                 case 'betmethod':
                     // 購入方法の選択処理
-                    await this.handleBetMethodSelection(interaction, args);
+                    await betHandlers.handleBetMethodSelection(interaction, args);
                     break;
 
                 case 'horse':
                     // 馬番選択の処理
-                    await this.handleHorseSelection(interaction, args);
+                    await betHandlers.handleHorseSelection(interaction, args);
                     break;
 
                 default:
@@ -398,7 +517,7 @@ class RaceBot {
             switch (type) {
                 case 'betamount':
                     // 金額入力の処理
-                    await this.handleBetAmountSubmit(interaction, args);
+                    await betHandlers.handleBetAmountSubmit(interaction, args);
                     break;
 
                 default:
