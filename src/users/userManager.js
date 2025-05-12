@@ -4,7 +4,7 @@ class UserManager {
     this.users = new Map(); // メモリ内ユーザー情報キャッシュ
     this.defaultPoints = 1000; // 初期ポイント
     this.firebaseClient = firebaseClient; // Firebase接続クライアント
-    
+
     // 起動時にユーザーデータをキャッシュに読み込み
     this.loadUsers();
   }
@@ -13,7 +13,7 @@ class UserManager {
   async loadUsers() {
     try {
       if (!this.firebaseClient) return;
-      
+
       const result = await this.firebaseClient.getAllUsers();
       if (result.success) {
         result.data.forEach(user => {
@@ -30,13 +30,13 @@ class UserManager {
   async registerUser(userId, username) {
     // すでに登録済みのユーザーチェック
     if (this.users.has(userId)) {
-      return { 
-        success: false, 
+      return {
+        success: false,
         message: 'すでに登録されているユーザーです。',
         user: this.users.get(userId)
       };
     }
-    
+
     // 新規ユーザー作成
     const user = {
       id: userId,
@@ -47,10 +47,10 @@ class UserManager {
       registeredAt: new Date(),
       updatedAt: new Date()
     };
-    
+
     // メモリ内キャッシュに保存
     this.users.set(userId, user);
-    
+
     // Firebaseに保存
     if (this.firebaseClient) {
       try {
@@ -60,11 +60,11 @@ class UserManager {
         // エラーがあっても処理は続行（次回再試行）
       }
     }
-    
-    return { 
-      success: true, 
-      message: 'ユーザー登録が完了しました。', 
-      user 
+
+    return {
+      success: true,
+      message: 'ユーザー登録が完了しました。',
+      user
     };
   }
 
@@ -74,7 +74,7 @@ class UserManager {
     if (this.users.has(userId)) {
       return this.users.get(userId);
     }
-    
+
     // キャッシュになければFirebaseから取得
     if (this.firebaseClient) {
       try {
@@ -87,7 +87,7 @@ class UserManager {
         console.error(`ユーザー取得エラー (ID: ${userId}):`, error);
       }
     }
-    
+
     return null;
   }
 
@@ -95,33 +95,33 @@ class UserManager {
   async updatePoints(userId, amount) {
     const user = await this.getUser(userId);
     if (!user) {
-      return { 
-        success: false, 
-        message: 'ユーザーが見つかりません。' 
+      return {
+        success: false,
+        message: 'ユーザーが見つかりません。'
       };
     }
-    
+
     // 馬券購入の場合はポイントを減算
     if (amount < 0) {
       if (user.points + amount < 0) {
-        return { 
-          success: false, 
-          message: 'ポイントが不足しています。' 
+        return {
+          success: false,
+          message: 'ポイントが不足しています。'
         };
       }
     }
-    
+
     // メモリ内のユーザーデータを更新
     user.points += amount;
     user.updatedAt = new Date();
-    
+
     // 払戻の場合は総獲得金額を更新
     let totalWinningsAdd = 0;
     if (amount > 0) {
       user.totalWinnings += amount;
       totalWinningsAdd = amount;
     }
-    
+
     // Firebaseに更新を反映
     if (this.firebaseClient) {
       try {
@@ -130,11 +130,11 @@ class UserManager {
         console.error(`ポイント更新のFirebase保存に失敗 (ID: ${userId}):`, error);
       }
     }
-    
-    return { 
-      success: true, 
-      message: 'ポイントを更新しました。', 
-      newPoints: user.points 
+
+    return {
+      success: true,
+      message: 'ポイントを更新しました。',
+      newPoints: user.points
     };
   }
 
@@ -142,17 +142,17 @@ class UserManager {
   async addBetHistory(userId, bet) {
     const user = await this.getUser(userId);
     if (!user) {
-      return { 
-        success: false, 
-        message: 'ユーザーが見つかりません。' 
+      return {
+        success: false,
+        message: 'ユーザーが見つかりません。'
       };
     }
-    
+
     // メモリ内の馬券履歴を更新
     if (!user.betHistory) {
       user.betHistory = [];
     }
-    
+
     user.betHistory.push({
       id: bet.id,
       raceId: bet.raceId,
@@ -164,7 +164,7 @@ class UserManager {
       status: bet.status,
       payout: bet.payout
     });
-    
+
     // Firebaseに馬券データを保存
     if (this.firebaseClient) {
       try {
@@ -173,10 +173,10 @@ class UserManager {
         console.error(`馬券履歴のFirebase保存に失敗 (ID: ${bet.id}):`, error);
       }
     }
-    
-    return { 
-      success: true, 
-      message: '馬券履歴を更新しました。' 
+
+    return {
+      success: true,
+      message: '馬券履歴を更新しました。'
     };
   }
 
@@ -187,14 +187,14 @@ class UserManager {
     if (!user || !user.betHistory) {
       return [];
     }
-    
+
     // キャッシュに履歴があれば返す
     if (user.betHistory.length > 0) {
       return user.betHistory
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .slice(0, limit);
     }
-    
+
     // キャッシュになければFirebaseから取得
     if (this.firebaseClient) {
       try {
@@ -208,41 +208,57 @@ class UserManager {
         console.error(`馬券履歴取得エラー (ID: ${userId}):`, error);
       }
     }
-    
+
     return [];
   }
 
   // ポイントランキングを取得
   async getPointsRanking(limit = 10) {
-    // 全ユーザーデータの更新
-    await this.loadUsers();
-    
-    const userArray = Array.from(this.users.values());
-    
-    // ポイントの降順でソート
-    return userArray
-      .sort((a, b) => b.points - a.points)
-      .slice(0, limit)
-      .map((user, index) => ({
-        rank: index + 1,
-        id: user.id,
-        username: user.username,
-        points: user.points,
-        totalWinnings: user.totalWinnings
-      }));
+    try {
+      // 全ユーザーデータの更新
+      await this.loadUsers();
+
+      const userArray = Array.from(this.users.values());
+
+      // ユーザーデータが存在しない場合は空配列を返す
+      if (userArray.length === 0) {
+        console.log('ランキング取得: ユーザーデータがありません');
+        return [];
+      }
+
+      // ポイントの降順でソート
+      return userArray
+        .sort((a, b) => b.points - a.points)
+        .slice(0, limit)
+        .map((user, index) => ({
+          rank: index + 1,
+          id: user.id,
+          username: user.username,
+          points: user.points,
+          totalWinnings: user.totalWinnings
+        }));
+    } catch (error) {
+      console.error('ポイントランキング取得エラー:', error);
+      return []; // エラー時は空配列を返す
+    }
   }
 
   // ユーザー一覧を取得
   async getAllUsers() {
-    // データの更新
-    await this.loadUsers();
-    return Array.from(this.users.values());
+    try {
+      // データの更新
+      await this.loadUsers();
+      return Array.from(this.users.values());
+    } catch (error) {
+      console.error('ユーザー一覧取得エラー:', error);
+      return []; // エラー時は空配列を返す
+    }
   }
 
   // ユーザーデータをFirebaseと同期
   async syncUserData(userId) {
     if (!this.firebaseClient) return;
-    
+
     const user = this.users.get(userId);
     if (user) {
       try {

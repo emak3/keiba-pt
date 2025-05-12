@@ -77,7 +77,7 @@ class RaceBot {
     // Readyイベントハンドラ
     async onReady() {
         console.log(`${this.client.user.tag} が起動しました！`);
-        
+
         // クライアントインスタンスを設定 (メッセージユーティリティとハンドラーで使用)
         this.client.bot = this;
 
@@ -99,7 +99,7 @@ class RaceBot {
         try {
             // 新しいレース情報を取得
             const races = await this.netkeibaClient.getTodayRaces();
-            
+
             // 既存レースの状態を維持しつつ更新
             if (this.todayRaces.length > 0) {
                 races.forEach(race => {
@@ -109,16 +109,16 @@ class RaceBot {
                     }
                 });
             }
-            
+
             this.todayRaces = races;
-            
+
             // Firebaseにレース情報を保存
             if (this.firebaseClient) {
                 const today = new Date();
                 const dateKey = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
                 await this.firebaseClient.saveTodayRaces(dateKey, races);
             }
-            
+
             console.log(`${this.todayRaces.length} レースの情報を取得しました。（JRA + 地方競馬）`);
         } catch (error) {
             console.error('レース情報の更新に失敗しました:', error);
@@ -271,6 +271,12 @@ class RaceBot {
         }
 
         try {
+            // インタラクションが有効かチェック（タイムアウト対策）
+            if (interaction.replied || interaction.deferred) {
+                console.log(`コマンド ${interaction.commandName} はすでに応答済みまたは遅延応答中`);
+                return;
+            }
+
             await command.execute(interaction, this);
         } catch (error) {
             console.error(`コマンド実行中にエラーが発生しました: ${error}`);
@@ -280,10 +286,44 @@ class RaceBot {
                 ephemeral: true
             };
 
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp(reply);
-            } else {
-                await interaction.reply(reply);
+            try {
+                if (interaction.replied) {
+                    await interaction.followUp(reply);
+                } else if (interaction.deferred) {
+                    await interaction.editReply(reply);
+                } else {
+                    await interaction.reply(reply);
+                }
+            } catch (replyError) {
+                // タイムアウトなどのエラーが発生した場合は無視
+                console.warn(`応答エラー: ${replyError.message}`);
+            }
+        }
+    }
+    // インタラクションハンドラ
+    async onInteraction(interaction) {
+        try {
+            if (interaction.isChatInputCommand()) {
+                await this.handleCommand(interaction);
+            } else if (interaction.isButton()) {
+                await this.handleButton(interaction);
+            } else if (interaction.isStringSelectMenu()) {
+                await this.handleSelectMenu(interaction);
+            } else if (interaction.isModalSubmit()) {
+                await this.handleModalSubmit(interaction);
+            }
+        } catch (error) {
+            console.error(`インタラクション処理中にエラーが発生しました: ${error}`);
+            try {
+                // まだ応答可能か確認
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: 'エラーが発生しました。しばらく経ってからお試しください。',
+                        ephemeral: true
+                    });
+                }
+            } catch (replyError) {
+                console.warn(`エラー応答中にさらにエラー: ${replyError.message}`);
             }
         }
     }
@@ -351,7 +391,7 @@ class RaceBot {
                         ephemeral: true
                     });
                 }
-                
+
                 // 馬券購入画面を表示
                 await messageUtils.showBetTypeOptions(interaction, raceId, raceType);
                 break;
@@ -369,6 +409,12 @@ class RaceBot {
         const [type, ...args] = interaction.customId.split('_');
 
         try {
+            // インタラクションのタイムアウトチェック
+            if (interaction.replied || interaction.deferred) {
+                console.log(`ボタン ${interaction.customId} はすでに応答済みまたは遅延応答中`);
+                return;
+            }
+
             switch (type) {
                 case 'race':
                     await this.handleRaceButton(interaction, args);
@@ -387,17 +433,23 @@ class RaceBot {
             }
         } catch (error) {
             console.error(`ボタン処理中にエラーが発生しました: ${error}`);
-            await interaction.reply({
-                content: 'エラーが発生しました。',
-                ephemeral: true
-            });
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: 'エラーが発生しました。',
+                        ephemeral: true
+                    });
+                }
+            } catch (replyError) {
+                console.warn(`ボタン応答エラー: ${replyError.message}`);
+            }
         }
     }
-    
+
     // ページングボタンの処理
     async handlePageButton(interaction, args) {
         const [direction, raceId, betType, selectionCount, page, raceType] = args;
-        
+
         // レース情報取得
         if (!this.raceDetails.has(raceId)) {
             const details = await this.netkeibaClient.getRaceDetails(raceId, raceType);
@@ -405,7 +457,7 @@ class RaceBot {
                 this.raceDetails.set(raceId, details);
             }
         }
-        
+
         const raceDetail = this.raceDetails.get(raceId);
         if (!raceDetail) {
             return interaction.reply({
@@ -413,7 +465,7 @@ class RaceBot {
                 ephemeral: true
             });
         }
-        
+
         // 馬番選択メニューの再表示（別ページ）
         const horses = raceDetail.horses;
         const pageNum = parseInt(page);
@@ -422,51 +474,51 @@ class RaceBot {
         const startIdx = (pageNum - 1) * pageSize;
         const endIdx = Math.min(startIdx + pageSize, horses.length);
         const currentPageHorses = horses.slice(startIdx, endIdx);
-        
+
         // 現在のページの馬番選択メニューを作成
-        const options = currentPageHorses.map(horse => 
+        const options = currentPageHorses.map(horse =>
             new StringSelectMenuOptionBuilder()
                 .setLabel(`${horse.umaban}番 ${horse.name}`)
                 .setDescription(`${horse.jockey} - オッズ: ${horse.odds}倍`)
                 .setValue(horse.umaban)
         );
-        
+
         const select = new StringSelectMenuBuilder()
             .setCustomId(`horse_normal_${raceId}_${betType}_${raceType}_${pageNum}`)
             .setPlaceholder('馬番を選択')
             .setMinValues(parseInt(selectionCount))
             .setMaxValues(parseInt(selectionCount))
             .addOptions(options);
-        
+
         const row = new ActionRowBuilder().addComponents(select);
-        
+
         // ページ切り替えボタンを追加
         const buttons = [];
-        
+
         if (pageNum > 1) {
             buttons.push(
                 new ButtonBuilder()
-                    .setCustomId(`page_prev_${raceId}_${betType}_${selectionCount}_${pageNum-1}_${raceType}`)
+                    .setCustomId(`page_prev_${raceId}_${betType}_${selectionCount}_${pageNum - 1}_${raceType}`)
                     .setLabel('←前のページ')
                     .setStyle(ButtonStyle.Secondary)
             );
         }
-        
+
         if (pageNum < totalPages) {
             buttons.push(
                 new ButtonBuilder()
-                    .setCustomId(`page_next_${raceId}_${betType}_${selectionCount}_${pageNum+1}_${raceType}`)
+                    .setCustomId(`page_next_${raceId}_${betType}_${selectionCount}_${pageNum + 1}_${raceType}`)
                     .setLabel('次のページ→')
                     .setStyle(ButtonStyle.Secondary)
             );
         }
-        
+
         const components = [row];
         if (buttons.length > 0) {
             const buttonRow = new ActionRowBuilder().addComponents(buttons);
             components.push(buttonRow);
         }
-        
+
         await interaction.update({
             content: `馬番を選択してください (${pageNum}/${totalPages}ページ目)`,
             components: components
@@ -478,6 +530,12 @@ class RaceBot {
         const [type, ...args] = interaction.customId.split('_');
 
         try {
+            // インタラクションのタイムアウトチェック
+            if (interaction.replied || interaction.deferred) {
+                console.log(`セレクトメニュー ${interaction.customId} はすでに応答済みまたは遅延応答中`);
+                return;
+            }
+
             switch (type) {
                 case 'bettype':
                     // 馬券タイプの選択処理
@@ -502,10 +560,16 @@ class RaceBot {
             }
         } catch (error) {
             console.error(`セレクトメニュー処理中にエラーが発生しました: ${error}`);
-            await interaction.reply({
-                content: 'エラーが発生しました。',
-                ephemeral: true
-            });
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: 'エラーが発生しました。',
+                        ephemeral: true
+                    });
+                }
+            } catch (replyError) {
+                console.warn(`セレクトメニュー応答エラー: ${replyError.message}`);
+            }
         }
     }
 
@@ -514,6 +578,12 @@ class RaceBot {
         const [type, ...args] = interaction.customId.split('_');
 
         try {
+            // インタラクションのタイムアウトチェック
+            if (interaction.replied || interaction.deferred) {
+                console.log(`モーダル ${interaction.customId} はすでに応答済みまたは遅延応答中`);
+                return;
+            }
+
             switch (type) {
                 case 'betamount':
                     // 金額入力の処理
@@ -528,10 +598,16 @@ class RaceBot {
             }
         } catch (error) {
             console.error(`モーダル処理中にエラーが発生しました: ${error}`);
-            await interaction.reply({
-                content: 'エラーが発生しました。',
-                ephemeral: true
-            });
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: 'エラーが発生しました。',
+                        ephemeral: true
+                    });
+                }
+            } catch (replyError) {
+                console.warn(`モーダル応答エラー: ${replyError.message}`);
+            }
         }
     }
 

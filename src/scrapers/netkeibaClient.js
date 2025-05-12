@@ -101,7 +101,7 @@ class NetkeibaClient {
     }
   }
 
-  // 当日の地方競馬レース一覧を取得
+// 当日の地方競馬レース一覧を取得
   async getTodayLocalRaces() {
     try {
       const today = new Date();
@@ -112,6 +112,7 @@ class NetkeibaClient {
       
       // 地方競馬のレース一覧URL - 複数の候補を試してみる
       const urls = [
+        `${this.localBaseUrl}/race_list/result/?kaisai_date=${dateString}`,
         `${this.localBaseUrl}/top/race_list_sub.html?kaisai_date=${dateString}`,
         `${this.localBaseUrl}/race/calendar.html?kaisai_date=${dateString}`,
         `${this.localBaseUrl}/race/kaisai_info.html?kaisai_date=${dateString}`
@@ -123,10 +124,31 @@ class NetkeibaClient {
       // いずれかのURLで成功するまで試行
       for (const url of urls) {
         try {
-          // エンコーディングを指定して取得（地方競馬サイトはEUC-JPの可能性が高い）
-          html = await this.axiosGetWithEncoding(url, 'euc-jp');
+          // まずShift_JISで試す
+          html = await this.axiosGetWithEncoding(url, 'shift_jis');
           successUrl = url;
-          console.log(`地方競馬情報取得成功: ${url}`);
+          console.log(`地方競馬情報取得成功(Shift_JIS): ${url}`);
+          
+          // エンコードのテスト（文字化けの確認）
+          const testStr = html.slice(0, 200);
+          console.log(`Shift_JISで取得した内容のサンプル: ${testStr}`);
+          
+          // 日本語らしき文字が含まれているか確認
+          if (!/[一-龠々〆〤]/.test(testStr)) {
+            console.log('日本語が検出されませんでした。EUC-JPで再試行します...');
+            html = await this.axiosGetWithEncoding(url, 'euc-jp');
+            const eucjpTest = html.slice(0, 200);
+            console.log(`EUC-JPで取得した内容のサンプル: ${eucjpTest}`);
+            
+            // さらにUTF-8でも試す
+            if (!/[一-龠々〆〤]/.test(eucjpTest)) {
+              console.log('EUC-JPでも日本語が検出されませんでした。UTF-8で再試行します...');
+              html = await this.axiosGetWithEncoding(url, 'utf-8');
+              const utf8Test = html.slice(0, 200);
+              console.log(`UTF-8で取得した内容のサンプル: ${utf8Test}`);
+            }
+          }
+          
           break; // 成功したらループを抜ける
         } catch (error) {
           console.warn(`地方競馬URL ${url} での取得に失敗: ${error.message}`);
@@ -141,102 +163,121 @@ class NetkeibaClient {
       const $ = cheerio.load(html);
       const races = [];
       
+      // HTML全体を出力（デバッグ用）
+      console.log('取得したHTML全体を検査します...');
+      const bodyText = $('body').text().slice(0, 500);
+      console.log(`ページ内容のサンプル: ${bodyText}`);
+      
       // 地方競馬レースの抽出 - 複数のセレクタを試す
+      console.log('地方競馬レースの抽出を開始します...');
       
-      // パターン1: JRAと同じセレクタ
-      $('.RaceList_DataList').each((_, element) => {
-        const track = $(element).find('.RaceList_DataTitle').text().trim();
-        // JRAでない場合は地方競馬と判断
-        if (!track.includes('JRA')) {
-          $(element).find('li').each((_, raceElement) => {
-            const raceLink = $(raceElement).find('a').attr('href');
-            if (raceLink) {
-              const raceId = raceLink.match(/race_id=([0-9]+)/)?.[1];
-              if (raceId) {
-                const raceNumber = $(raceElement).find('.RaceList_Itemnum').text().trim();
-                const raceName = $(raceElement).find('.RaceList_ItemTitle').text().trim();
-                const raceTime = $(raceElement).find('.RaceList_Itemtime').text().trim();
-                
-                races.push({
-                  id: raceId,
-                  track: track,
-                  number: raceNumber.replace('R', ''),
-                  name: raceName,
-                  time: raceTime,
-                  status: '発走前',
-                  url: (raceLink.startsWith('http') ? raceLink : `${this.localBaseUrl}${raceLink}`),
-                  type: 'local' // 地方競馬レースを識別
-                });
-              }
-            }
-          });
-        }
-      });
-      
-      // パターン2: 地方競馬用のセレクタ
-      $('.RaceKaisai_data').each((_, element) => {
-        const track = $(element).find('.RaceKaisai_data_head').text().trim();
-        $(element).find('.RaceKaisai_data_title a').each((_, raceElement) => {
-          const raceLink = $(raceElement).attr('href');
+      // パターン1: 特定のHTML構造を探す
+      $('.race_kaisai').each((_, element) => {
+        const kaisiaiInfo = $(element).find('.race_kaisai_info').text().trim();
+        console.log(`競馬場情報: ${kaisiaiInfo}`);
+        
+        $(element).find('.race_top_hold_list li').each((_, raceElement) => {
+          const raceNum = $(raceElement).find('.race_num').text().trim();
+          const raceName = $(raceElement).find('.race_name').text().trim();
+          const raceTime = $(raceElement).find('.race_time').text().trim();
+          
+          console.log(`レース情報: ${raceNum} ${raceName} ${raceTime}`);
+          
+          const raceLink = $(raceElement).find('a').attr('href');
           if (raceLink) {
-            const raceId = raceLink.match(/race_id=([0-9]+)/)?.[1];
-            if (raceId) {
-              const raceInfo = $(raceElement).text().trim();
-              const raceMatch = raceInfo.match(/(\d+)R\s+(.+)/);
-              
-              if (raceMatch) {
-                const raceNumber = raceMatch[1];
-                const raceName = raceMatch[2];
-                
-                races.push({
-                  id: raceId,
-                  track: track,
-                  number: raceNumber,
-                  name: raceName,
-                  time: '---', // 時間が取得できない場合
-                  status: '発走前',
-                  url: (raceLink.startsWith('http') ? raceLink : `${this.localBaseUrl}${raceLink}`),
-                  type: 'local'
-                });
-              }
-            }
+            const raceId = raceLink.match(/race_id=([0-9]+)/)?.[1] || 
+                          `local-${Date.now()}-${races.length}`;
+            
+            races.push({
+              id: raceId,
+              track: kaisiaiInfo || '地方競馬場',
+              number: raceNum.replace(/R.*$/, ''),
+              name: raceName || '地方競馬レース',
+              time: raceTime || '---',
+              status: '発走前',
+              url: (raceLink.startsWith('http') ? raceLink : `${successUrl.split('/').slice(0, 3).join('/')}${raceLink}`),
+              type: 'local'
+            });
           }
         });
       });
       
-      // もしまだレースが取得できていない場合は、さらに別のセレクタを試す
+      // パターン2: 別のセレクタ構造を試す
       if (races.length === 0) {
-        // 地方競馬カレンダーページから抽出
-        $('.race_top_hold_list li').each((_, raceElement) => {
-          const raceLink = $(raceElement).find('a').attr('href');
-          if (raceLink) {
-            const raceId = raceLink.match(/race_id=([0-9]+)/)?.[1] || 
-                          `local-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            
-            const trackElement = $(raceElement).closest('.race_kaisai');
-            const track = trackElement.find('.race_kaisai_info').text().trim() || '地方競馬場';
-            const raceNumber = $(raceElement).find('.race_num').text().trim() || '1R';
-            const raceName = $(raceElement).find('.race_name').text().trim() || '地方競馬レース';
-            const raceTime = $(raceElement).find('.race_time').text().trim() || '---';
-            
-            races.push({
-              id: raceId,
-              track: track,
-              number: raceNumber.replace('R', ''),
-              name: raceName,
-              time: raceTime,
-              status: '発走前',
-              url: (raceLink.startsWith('http') ? raceLink : `${this.localBaseUrl}${raceLink}`),
-              type: 'local'
+        console.log('パターン1で取得できませんでした。パターン2を試します...');
+        $('.RaceList_DataList').each((_, element) => {
+          const track = $(element).find('.RaceList_DataTitle').text().trim();
+          console.log(`検出された競馬場: ${track}`);
+          
+          if (!track.includes('JRA')) {
+            $(element).find('li').each((_, raceElement) => {
+              const raceNum = $(raceElement).find('.RaceList_Itemnum').text().trim();
+              const raceName = $(raceElement).find('.RaceList_ItemTitle').text().trim();
+              const raceTime = $(raceElement).find('.RaceList_Itemtime').text().trim();
+              
+              console.log(`レース情報: ${raceNum} ${raceName} ${raceTime}`);
+              
+              const raceLink = $(raceElement).find('a').attr('href');
+              if (raceLink) {
+                const raceId = raceLink.match(/race_id=([0-9]+)/)?.[1];
+                if (raceId) {
+                  races.push({
+                    id: raceId,
+                    track: track,
+                    number: raceNum.replace('R', ''),
+                    name: raceName,
+                    time: raceTime,
+                    status: '発走前',
+                    url: (raceLink.startsWith('http') ? raceLink : `${this.localBaseUrl}${raceLink}`),
+                    type: 'local'
+                  });
+                }
+              }
             });
           }
         });
       }
       
-      // デバッグ出力
-      console.log(`地方競馬レース取得成功: ${races.length} レース`);
+      // 直接開催情報を取得する方法
+      if (races.length === 0) {
+        console.log('パターン2でも取得できませんでした。直接検索します...');
+        
+        // すべてのa要素のhrefを調査
+        $('a').each((_, element) => {
+          const href = $(element).attr('href');
+          if (href && href.includes('race_id=')) {
+            const raceId = href.match(/race_id=([0-9]+)/)?.[1];
+            const text = $(element).text().trim();
+            console.log(`レースリンク発見: ${text} (ID: ${raceId})`);
+            
+            if (raceId && !races.some(r => r.id === raceId)) {
+              // テキストからレース情報を抽出
+              const raceNumMatch = text.match(/(\d+)R/);
+              const raceTimeMatch = text.match(/(\d+):(\d+)/);
+              
+              races.push({
+                id: raceId,
+                track: '地方競馬場',
+                number: raceNumMatch ? raceNumMatch[1] : '?',
+                name: text.replace(/\d+R/, '').trim() || '地方競馬レース',
+                time: raceTimeMatch ? `${raceTimeMatch[1]}:${raceTimeMatch[2]}` : '---',
+                status: '発走前',
+                url: href.startsWith('http') ? href : `${successUrl.split('/').slice(0, 3).join('/')}${href}`,
+                type: 'local'
+              });
+            }
+          }
+        });
+      }
+      
+      // デバッグ情報
+      console.log(`地方競馬レース取得結果: ${races.length}件`);
       if (races.length > 0) {
-        console.log('最初のレース例:', JSON.stringify(races[0], null, 2));
+        races.forEach((race, i) => {
+          console.log(`レース${i+1}: ${race.track} ${race.number}R ${race.name} (${race.time})`);
+        });
+      } else {
+        console.log('地方競馬レースは見つかりませんでした');
       }
       
       return races;

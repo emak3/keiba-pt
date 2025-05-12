@@ -187,12 +187,34 @@ async function showNormalHorseSelection(interaction, raceId, betType, raceDetail
   }
   
   // 馬番選択メニューの作成
-  const options = raceDetail.horses.map(horse => 
+  // まず実際に登録されている出走馬だけをフィルタリング
+  const validHorses = raceDetail.horses.filter(horse => 
+    horse.umaban && horse.name && !horse.name.includes('取消') && !horse.name.includes('出走取消')
+  );
+  
+  console.log(`${raceDetail.title}の有効な出走馬: ${validHorses.length}頭`);
+  console.log(`馬番一覧: ${validHorses.map(h => h.umaban).join(', ')}`);
+  
+  const options = validHorses.map(horse => 
     new StringSelectMenuOptionBuilder()
       .setLabel(`${horse.umaban}番 ${horse.name}`)
       .setDescription(`${horse.jockey} - オッズ: ${horse.odds}倍`)
       .setValue(horse.umaban)
   );
+  
+  // Discordの制限: 最大25個のオプション
+  if (options.length > 25) {
+    // ページ分割が必要
+    return handleLargeHorseSelection(interaction, raceId, betType, raceDetail, selectionCount, raceType);
+  }
+  
+  // オプションが存在するか確認
+  if (options.length === 0) {
+    return interaction.update({
+      content: 'レース情報が不完全です。馬番情報が取得できませんでした。',
+      components: []
+    });
+  }
   
   const select = new StringSelectMenuBuilder()
     .setCustomId(`horse_normal_${raceId}_${betType}_${raceType}`)
@@ -225,24 +247,41 @@ async function showBoxHorseSelection(interaction, raceId, betType, raceDetail, r
   }
   
   // 馬番選択メニューの作成
-  const options = raceDetail.horses.map(horse => 
+  // まず実際に登録されている出走馬だけをフィルタリング
+  const validHorses = raceDetail.horses.filter(horse => 
+    horse.umaban && horse.name && !horse.name.includes('取消') && !horse.name.includes('出走取消')
+  );
+  
+  console.log(`ボックス馬券: ${raceDetail.title}の有効な出走馬: ${validHorses.length}頭`);
+  
+  const options = validHorses.map(horse => 
     new StringSelectMenuOptionBuilder()
       .setLabel(`${horse.umaban}番 ${horse.name}`)
       .setDescription(`${horse.jockey} - オッズ: ${horse.odds}倍`)
       .setValue(horse.umaban)
   );
   
-  // Discordの制限: 最大25個のオプション
-  if (options.length > 25) {
-    // ページ分割が必要
-    return handleLargeHorseSelection(interaction, raceId, betType, raceDetail, selectionCount, raceType);
+  // オプションが存在するか確認
+  if (options.length === 0) {
+    return interaction.update({
+      content: 'レース情報が不完全です。馬番情報が取得できませんでした。',
+      components: []
+    });
+  }
+  
+  // 最小選択数より出走馬が少ない場合
+  if (options.length < minSelections) {
+    return interaction.update({
+      content: `ボックス馬券には最低${minSelections}頭の出走馬が必要ですが、出走馬は${options.length}頭しかいません。`,
+      components: []
+    });
   }
   
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`horse_normal_${raceId}_${betType}_${raceType}`)
+    .setCustomId(`horse_box_${raceId}_${betType}_${raceType}`)
     .setPlaceholder('馬番を選択')
-    .setMinValues(selectionCount)
-    .setMaxValues(selectionCount)
+    .setMinValues(minSelections)
+    .setMaxValues(options.length > 25 ? 25 : options.length) // Discordの制限
     .addOptions(options);
   
   const row = new ActionRowBuilder().addComponents(select);
@@ -293,18 +332,55 @@ async function showFormationHorseSelection(interaction, raceId, betType, raceDet
   const currentStep = currentState.step;
   
   // 馬番選択メニューの作成
-  const options = raceDetail.horses.map(horse => 
+  // まず実際に登録されている出走馬だけをフィルタリング
+  const validHorses = raceDetail.horses.filter(horse => 
+    horse.umaban && horse.name && !horse.name.includes('取消') && !horse.name.includes('出走取消')
+  );
+  
+  console.log(`フォーメーション馬券: ${raceDetail.title}の有効な出走馬: ${validHorses.length}頭`);
+  
+  // 特定のステップで選択済みの馬番を除外（同じ馬は複数の位置に選択できない）
+  let availableHorses = [...validHorses];
+  
+  if (currentStep === 'second' || currentStep === 'third') {
+    // 1着で選択した馬を除外
+    const firstHorseNumbers = currentState.selections.first;
+    availableHorses = availableHorses.filter(horse => !firstHorseNumbers.includes(horse.umaban));
+  }
+  
+  if (currentStep === 'third') {
+    // 2着で選択した馬も除外
+    const secondHorseNumbers = currentState.selections.second;
+    availableHorses = availableHorses.filter(horse => !secondHorseNumbers.includes(horse.umaban));
+  }
+  
+  // オプションが存在するか確認
+  if (availableHorses.length === 0) {
+    interaction.client.formationState = {}; // 状態をリセット
+    return interaction.update({
+      content: '選択可能な馬がいません。フォーメーション選択をキャンセルします。',
+      components: []
+    });
+  }
+  
+  const options = availableHorses.map(horse => 
     new StringSelectMenuOptionBuilder()
       .setLabel(`${horse.umaban}番 ${horse.name}`)
       .setDescription(`${horse.jockey} - オッズ: ${horse.odds}倍`)
       .setValue(horse.umaban)
   );
   
+  // Discordの制限: 最大25個のオプション
+  if (options.length > 25) {
+    options.splice(25); // 25個を超える部分はカット
+    console.log(`オプションが多すぎるため、最初の25個だけを使用します`);
+  }
+  
   const select = new StringSelectMenuBuilder()
     .setCustomId(`horse_formation_${raceId}_${betType}_${currentStep}_${raceType}`)
     .setPlaceholder('馬番を選択')
     .setMinValues(1)
-    .setMaxValues(options.length > 25 ? 25 : options.length) // Discordの制限
+    .setMaxValues(options.length) // すべて選択可能
     .addOptions(options);
   
   const row = new ActionRowBuilder().addComponents(select);
@@ -482,14 +558,27 @@ function formatSelections(selections) {
 }
 // 多すぎる馬番選択のページ分割処理
 async function handleLargeHorseSelection(interaction, raceId, betType, raceDetail, selectionCount, raceType = 'jra') {
-  // 馬をページ分割（最大25頭ずつ）
-  const horses = raceDetail.horses;
+  // 有効な馬をページ分割（最大25頭ずつ）
+  const validHorses = raceDetail.horses.filter(horse => 
+    horse.umaban && horse.name && !horse.name.includes('取消') && !horse.name.includes('出走取消')
+  );
+  
   const page = parseInt(interaction.customId.split('_').pop()) || 1;
   const pageSize = 25;
-  const totalPages = Math.ceil(horses.length / pageSize);
+  const totalPages = Math.ceil(validHorses.length / pageSize);
   const startIdx = (page - 1) * pageSize;
-  const endIdx = Math.min(startIdx + pageSize, horses.length);
-  const currentPageHorses = horses.slice(startIdx, endIdx);
+  const endIdx = Math.min(startIdx + pageSize, validHorses.length);
+  const currentPageHorses = validHorses.slice(startIdx, endIdx);
+  
+  console.log(`ページ分割: ${raceDetail.title}のページ ${page}/${totalPages}, 現在のページの馬: ${currentPageHorses.length}頭`);
+  
+  // オプションが0の場合のエラー処理
+  if (currentPageHorses.length === 0) {
+    return interaction.update({
+      content: 'このページには有効な出走馬がいません。',
+      components: []
+    });
+  }
   
   // 現在のページの馬番選択メニューを作成
   const options = currentPageHorses.map(horse => 
@@ -529,10 +618,9 @@ async function handleLargeHorseSelection(interaction, raceId, betType, raceDetai
     );
   }
   
-  const buttonRow = new ActionRowBuilder().addComponents(buttons);
-  
   const components = [row];
   if (buttons.length > 0) {
+    const buttonRow = new ActionRowBuilder().addComponents(buttons);
     components.push(buttonRow);
   }
   
@@ -556,8 +644,17 @@ function isRaceBettingAvailable(race) {
   // 現在時刻の取得
   const now = new Date();
   
-  // レース時間のパース (例: "10:30")
-  const timeMatch = race.time.match(/(\d+):(\d+)/);
+  // レース時間のパース
+  // さまざまな形式に対応: "10:30", "11:45発走", "10時30分", など
+  let timeStr = race.time;
+  
+  // 「発走」の文字を削除
+  timeStr = timeStr.replace(/発走/g, '');
+  
+  // 時間表記の抽出 (時:分, 時分, 時時分分 など様々なパターンに対応)
+  const timeMatch = timeStr.match(/(\d{1,2})[^\d]*(\d{1,2})/);
+  console.log(`レース時間パース: "${race.time}" -> ${timeMatch ? `${timeMatch[1]}:${timeMatch[2]}` : '不明'}`);
+  
   if (!timeMatch) {
     return true; // 時間形式が不明な場合は許可
   }
