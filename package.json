@@ -1,29 +1,31 @@
 {
-  "name": "jra-discord-bot",
+  "name": "keiba-discord-bot",
   "version": "1.0.0",
-  "description": "JRAレース情報を利用したDiscord上での馬券購入シミュレーションボット",
-  "main": "src/index.js",
+  "description": "Discord用競馬情報・馬券購入Bot",
+  "main": "src/bot/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "deploy": "node src/deploy-commands.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/bot/index.js",
+    "dev": "nodemon src/bot/index.js",
+    "deploy-commands": "node src/bot/deploy-commands.js",
+    "test": "jest"
   },
-  "keywords": [
-    "discord",
-    "bot",
-    "jra",
-    "keiba",
-    "betting"
-  ],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
-    "axios": "^1.6.2",
+    "axios": "^1.4.0",
     "cheerio": "^1.0.0-rc.12",
     "discord.js": "^14.19.1",
     "dotenv": "^16.3.1",
-    "firebase-admin": "^11.11.1",
-    "iconv-lite": "^0.6.3",
-    "node-cron": "^3.0.3"
-  }
+    "firebase-admin": "^11.10.1",
+    "node-cron": "^3.0.2",
+    "puppeteer": "^22.8.2",
+    "winston": "^3.10.0"
+  },
+  "devDependencies": {
+    "jest": "^29.6.2",
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.9.0"
+  },
+  "author": "",
+  "license": "MIT"
 }
