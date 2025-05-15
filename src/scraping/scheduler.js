@@ -69,22 +69,6 @@ async function fetchAllRaceData() {
 }
 
 /**
- * レース一覧をデータベースに保存
-async function updateRaceList(races) {
-  try {
-    console.log('レース一覧をデータベースに保存します...');
-    // 一括保存などの処理
-    for (const race of races) {
-      await updateRaceStatus(race);
-    }
-    console.log('レース一覧の保存が完了しました');
-  } catch (error) {
-    console.error('レース一覧の更新中にエラーが発生しました:', error);
-  }
-}
- */
-
-/**
  * レース結果をチェック
  */
 async function checkRaceResults() {
