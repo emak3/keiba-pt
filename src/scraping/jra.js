@@ -5,6 +5,9 @@ const cheerio = require('cheerio');
 const iconv = require('iconv-lite');
 const selectors = require('./selectors').jra;
 const { saveRaceData, saveResultData } = require('../db/races');
+const { getJapanTimeISOString } = require('../utils/date-helper');
+const { extractDateFromRaceId } = require('../utils/date-helper');
+const { getTrackNameFromRaceId } = require('../utils/track-helper');
 
 /**
  * 特定のレースの出馬表を取得する（エンコーディング問題修正）
@@ -133,7 +136,7 @@ async function getRaceDetails(raceId) {
       distance: raceDistance,
       surface: raceSurface,
       horses,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: getJapanTimeISOString()
     };
 
     // Firebaseに保存
@@ -151,7 +154,7 @@ async function getRaceDetails(raceId) {
       distance: '不明',
       surface: '不明',
       horses: [],
-      lastUpdated: new Date().toISOString(),
+      lastUpdated: getJapanTimeISOString(),
       error: error.message
     };
   }
@@ -223,7 +226,7 @@ async function getRaceResult(raceId) {
       results,
       payouts,
       isCompleted: true,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: getJapanTimeISOString()
     };
 
     // Firebaseに保存
@@ -239,7 +242,7 @@ async function getRaceResult(raceId) {
       results: [],
       payouts: {},
       isCompleted: true,
-      lastUpdated: new Date().toISOString(),
+      lastUpdated: getJapanTimeISOString(),
       error: error.message
     };
   }
@@ -310,9 +313,9 @@ async function getTodayRaces() {
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
     const day = date.getDate();
-    
+
     const url = `https://race.netkeiba.com/top/race_list.html?kaisai_date=${year}${month.toString().padStart(2, '0')}${day.toString().padStart(2, '0')}`;
-    
+
     // エンコーディング対応
     const response = await axios.get(url, {
       headers: {
@@ -321,44 +324,53 @@ async function getTodayRaces() {
       },
       responseType: 'arraybuffer'
     });
-    
+
     // EUC-JPでデコード
     const html = iconv.decode(response.data, 'EUC-JP');
     const $ = cheerio.load(html);
-    
+
     const races = [];
-    
+
     // 各会場のレース情報を取得
     $('.RaceList_DataItem').each((i, element) => {
       try {
         const track = $(element).find('.RaceList_DataTitle').text().trim();
-        
+
         $(element).find('li').each((j, race) => {
           try {
             const raceNumber = $(race).find('.Race_Num').text().trim();
             const raceLink = $(race).find('a').attr('href');
             let raceId = '';
-            
+
             if (raceLink) {
               const match = raceLink.match(/race_id=([0-9]+)/);
               if (match && match[1]) {
                 raceId = match[1];
               }
             }
-            
-            if (!raceId) return;  // レースIDがなければスキップ
-            
+
+            if (!raceId) return;
+
             const raceName = $(race).find('.Race_Name').text().trim();
             const raceTime = $(race).find('.Race_Time').text().trim();
-            
+
+            // スクレイピングで取得した会場名
+            let trackName = null;
+
+            // 会場名が取得できない場合はレースIDから取得
+            if (!trackName) {
+              trackName = getTrackNameFromRaceId(raceId);
+              console.log(`会場名がスクレイピングできなかったため、レースID ${raceId} から会場名 ${trackName} を設定しました`);
+            }
+
             races.push({
               id: raceId,
-              track,
+              track: trackName,
               number: raceNumber,
               name: raceName,
               time: raceTime,
               type: 'jra',
-              date: `${year}/${month}/${day}`,
+              date: extractDateFromRaceId(raceId),
               isCompleted: false
             });
           } catch (innerError) {
@@ -369,7 +381,7 @@ async function getTodayRaces() {
         console.error('会場情報の解析中にエラーが発生しました:', outerError);
       }
     });
-    
+
     console.log(`JRAレース一覧: ${races.length}件取得`);
     return races;
   } catch (error) {

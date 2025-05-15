@@ -5,6 +5,9 @@ const cheerio = require('cheerio');
 const iconv = require('iconv-lite');
 const selectors = require('./selectors').nar;
 const { saveRaceData, saveResultData } = require('../db/races');
+const { getJapanTimeISOString } = require('../utils/date-helper');
+const { extractDateFromRaceId } = require('../utils/date-helper');
+const { getTrackNameFromRaceId } = require('../utils/track-helper');
 
 /**
  * 特定のレースの出馬表を取得する（エンコーディング問題修正）
@@ -73,18 +76,20 @@ async function getRaceDetails(raceId) {
     $(selectors.horseList).each((i, element) => {
       try {
         // 枠番・馬番の取得
-        let gate = '0';
-        let number = '0';
-
-        const gateEl = $(element).find(selectors.gate).first();
-        if (gateEl.length > 0) {
-          gate = gateEl.text().trim();
+        let gate = $(element).find('.Waku1, .Waku2').text().trim() || '0';
+        if (gate === '0') {
+          // バックアップ方法で取得を試みる
+          gate = $(element).find('td').eq(0).text().trim() || '0';
         }
 
-        const numberEl = $(element).find(selectors.number).first();
-        if (numberEl.length > 0) {
-          number = numberEl.text().trim();
+        // 馬番取得の改善
+        let number = $(element).find('.Umaban1, .Umaban2').text().trim() || '0';
+        if (number === '0') {
+          // バックアップ方法で取得を試みる
+          number = $(element).find('td').eq(1).text().trim() || '0';
         }
+
+        console.log(`馬情報取得: 枠番=${gate}, 馬番=${number}`);
 
         // 馬名取得
         let horseName = $(element).find(selectors.horseName).text().trim();
@@ -156,7 +161,7 @@ async function getRaceDetails(raceId) {
       distance: raceDistance,
       surface: raceSurface,
       horses,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: getJapanTimeISOString()
     };
 
     // Firebaseに保存
@@ -174,7 +179,7 @@ async function getRaceDetails(raceId) {
       distance: '不明',
       surface: '不明',
       horses: [],
-      lastUpdated: new Date().toISOString(),
+      lastUpdated: getJapanTimeISOString(),
       error: error.message
     };
   }
@@ -246,7 +251,7 @@ async function getRaceResult(raceId) {
       results,
       payouts,
       isCompleted: true,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: getJapanTimeISOString()
     };
 
     // Firebaseに保存
@@ -262,7 +267,7 @@ async function getRaceResult(raceId) {
       results: [],
       payouts: {},
       isCompleted: true,
-      lastUpdated: new Date().toISOString(),
+      lastUpdated: getJapanTimeISOString(),
       error: error.message
     };
   }
@@ -331,11 +336,11 @@ async function getTodayRaces() {
     // 当日のレース一覧ページを取得
     const date = new Date();
     const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    
-    const url = `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=${year}${month.toString().padStart(2, '0')}${day.toString().padStart(2, '0')}`;
-    
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+
+    const url = `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=${year}${month}${day}`;
+
     // エンコーディング対応
     const response = await axios.get(url, {
       headers: {
@@ -344,55 +349,61 @@ async function getTodayRaces() {
       },
       responseType: 'arraybuffer'
     });
-    
+
     // EUC-JPでデコード
     const html = iconv.decode(response.data, 'EUC-JP');
     const $ = cheerio.load(html);
-    
+
     const races = [];
-    
+
     // 各会場のレース情報を取得
     $('.RaceList_Data').each((i, element) => {
       try {
-        const track = $(element).find('.Jyo a').text().trim();
-        
         $(element).find('li').each((j, race) => {
           try {
             const raceNumber = $(race).find('.Race_Num').text().trim();
             const raceLink = $(race).find('a').attr('href');
             let raceId = '';
-            
+
             if (raceLink) {
               const match = raceLink.match(/race_id=([0-9]+)/);
               if (match && match[1]) {
                 raceId = match[1];
               }
             }
-            
-            if (!raceId) return;  // レースIDがなければスキップ
-            
+
+            if (!raceId) return;
+
             const raceName = $(race).find('.Race_Name').text().trim();
             const raceTime = $(race).find('.Race_Time').text().trim();
-            
+
+            // スクレイピングで取得した会場名
+            let trackName = null;
+
+            // 会場名が取得できない場合はレースIDから取得
+            if (!trackName) {
+              trackName = getTrackNameFromRaceId(raceId);
+              console.log(`会場名がスクレイピングできなかったため、レースID ${raceId} から会場名 ${trackName} を設定しました`);
+            }
+
             races.push({
               id: raceId,
-              track,
+              track: trackName,
               number: raceNumber,
               name: raceName,
               time: raceTime,
-              type: 'nar',
-              date: `${year}/${month}/${day}`,
+              type: 'nra',
+              date: extractDateFromRaceId(raceId),
               isCompleted: false
             });
           } catch (innerError) {
-            console.error('地方競馬レース情報の解析中にエラーが発生しました:', innerError);
+            console.error('レース情報の解析中にエラーが発生しました:', innerError);
           }
         });
       } catch (outerError) {
-        console.error('地方競馬会場情報の解析中にエラーが発生しました:', outerError);
+        console.error('会場情報の解析中にエラーが発生しました:', outerError);
       }
     });
-    
     console.log(`地方競馬レース一覧: ${races.length}件取得`);
     return races;
   } catch (error) {
