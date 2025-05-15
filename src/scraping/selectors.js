@@ -1,6 +1,4 @@
-// selectors.js - スクレイピングに使用するセレクタを定義
-// このファイルを分離することで、netkeibaのHTMLが変更された場合に修正が容易になります
-
+// selectors.js - 拡張版（追加セレクタ対応）
 module.exports = {
   // JRA関連セレクタ
   jra: {
@@ -12,6 +10,14 @@ module.exports = {
     horseName: '.HorseName a',
     jockeyName: '.Jockey a',
     odds: '.Popular span',
+    
+    // 追加セレクタ（代替取得方法用）
+    alternativeTime: '.RaceList_Item01 .RaceData01',
+    alternativeRaceName: '.RaceName',
+    alternativeHorseName: '.Horse_Name a',
+    alternativeJockey: '.Jockey',
+    weight: '.Weight',
+    popularity: '.Popular_Ninki',
     
     // 払戻金関連
     tansho: {
@@ -66,6 +72,14 @@ module.exports = {
     horseName: '.HorseName a',
     jockeyName: '.Jockey a',
     odds: '.Popular',
+    
+    // 追加セレクタ（代替取得方法用）
+    gate: '.Waku, .Waku1, .Waku2',
+    number: '.Umaban, .Umaban1, .Umaban2',
+    alternativeHorseName: '.Horse_Name a',
+    alternativeJockey: '.Jockey, .Jockey a',
+    weight: '.Weight',
+    popularity: '.Popular.Txt_C, .Popular_Ninki',
     
     // 払戻金関連（JRAとほぼ同じ構造だが念のため分離）
     tansho: {

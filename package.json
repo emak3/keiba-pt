@@ -21,6 +21,7 @@
     "cheerio": "^1.0.0-rc.12",
     "discord.js": "^14.19.1",
     "firebase-admin": "^11.8.0",
+    "iconv-lite": "^0.6.3",
     "node-cron": "^3.0.2"
   }
 }
