@@ -7,7 +7,7 @@ const selectors = require('./selectors').nar;
 const { saveRaceData, saveResultData } = require('../db/races');
 const { getJapanTimeISOString } = require('../utils/date-helper');
 const { extractDateFromRaceId } = require('../utils/date-helper');
-const { getTrackNameFromRaceId } = require('../utils/track-helper');
+const { getRaceNumberFromRaceId, getTrackNameFromRaceId } = require('../utils/track-helper');
 
 /**
  * 特定のレースの出馬表を取得する（エンコーディング問題修正）

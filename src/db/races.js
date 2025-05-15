@@ -2,7 +2,7 @@
 const { getDb } = require('./firebase');
 const { getJapanTimeISOString } = require('../utils/date-helper');
 const { extractDateFromRaceId } = require('../utils/date-helper');
-const { getTrackNameFromRaceId } = require('../utils/track-helper');
+const { getRaceNumberFromRaceId, getTrackNameFromRaceId } = require('../utils/track-helper');
 
 /**
  * レース一覧をデータベースに保存
@@ -173,7 +173,7 @@ async function fixRaceDates() {
         id: raceId,
         name: raceData.name,
         track: raceData.track || trackName,
-        number: raceData.number || '',
+        number: raceData.number || getRaceNumberFromRaceId(raceId),
         time: raceData.time,
         type: raceData.type || 'jra',
         date: raceData.date || extractDateFromRaceId(raceId),
