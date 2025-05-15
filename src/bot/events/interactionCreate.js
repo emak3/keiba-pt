@@ -1,35 +1,87 @@
-// src/bot/events/interactionCreate.js
-const { Events } = require('discord.js');
-const logger = require('../../utils/logger');
+// interactionCreate.js - インタラクションを処理するイベント
+const { Events, InteractionType } = require('discord.js');
+const { getUserByDiscordId, createUser } = require('../../db/users');
 
 module.exports = {
   name: Events.InteractionCreate,
   async execute(interaction) {
-    // コマンド以外の相互作用は無視
-    if (!interaction.isChatInputCommand()) return;
+    // コマンド実行時
+    if (interaction.isChatInputCommand()) {
+      // コマンドを取得
+      const command = interaction.client.commands.get(interaction.commandName);
 
-    const command = interaction.client.commands.get(interaction.commandName);
+      if (!command) {
+        console.error(`${interaction.commandName}というコマンドが見つかりません。`);
+        return;
+      }
 
-    if (!command) {
-      logger.error(`コマンド ${interaction.commandName} が見つかりません`);
-      return;
+      try {
+        // ユーザー情報を取得（存在しない場合は作成）
+        const user = await getUserByDiscordId(interaction.user.id);
+        
+        if (!user) {
+          await createUser({
+            discordId: interaction.user.id,
+            username: interaction.user.username
+          });
+        }
+        
+        // コマンドを実行
+        await command.execute(interaction);
+      } catch (error) {
+        console.error(`${interaction.commandName}コマンドの実行中にエラーが発生しました:`, error);
+        
+        const replyOptions = {
+          content: 'コマンドの実行中にエラーが発生しました。',
+          ephemeral: true
+        };
+        
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(replyOptions);
+        } else {
+          await interaction.reply(replyOptions);
+        }
+      }
     }
-
-    try {
-      await command.execute(interaction);
-    } catch (error) {
-      logger.error(`コマンド ${interaction.commandName} の実行中にエラーが発生しました`, error);
+    // コンポーネント操作時（ボタン、セレクトメニューなど）
+    else if (interaction.isButton() || interaction.isStringSelectMenu()) {
+      // カスタムIDを解析
+      const [handler, action, ...args] = interaction.customId.split(':');
       
-      // 既に応答済みでなければエラーメッセージを送信
-      const replyContent = {
-        content: 'このコマンドの実行中にエラーが発生しました。',
-        ephemeral: true
-      };
+      // 対応するコマンドを取得
+      const command = interaction.client.commands.get(handler);
       
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp(replyContent);
-      } else {
-        await interaction.reply(replyContent);
+      if (!command || !command.handleInteraction) {
+        console.error(`${handler}コマンドが見つかりません、またはhandleInteractionメソッドがありません。`);
+        return;
+      }
+      
+      try {
+        // ユーザー情報を取得（存在しない場合は作成）
+        const user = await getUserByDiscordId(interaction.user.id);
+        
+        if (!user) {
+          await createUser({
+            discordId: interaction.user.id,
+            username: interaction.user.username
+          });
+        }
+        
+        // インタラクションを処理
+        await command.handleInteraction(interaction, action, args);
+      } catch (error) {
+        console.error(`インタラクション処理中にエラーが発生しました:`, error);
+        
+        const replyOptions = {
+          content: 'インタラクションの処理中にエラーが発生しました。',
+          ephemeral: true
+        };
+        
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(replyOptions);
+        } else {
+          await interaction.reply(replyOptions);
+        }
       }
     }
   }
