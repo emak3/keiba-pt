@@ -70,7 +70,6 @@ async function fetchAllRaceData() {
 
 /**
  * レース一覧をデータベースに保存
-
 async function updateRaceList(races) {
   try {
     console.log('レース一覧をデータベースに保存します...');
@@ -84,6 +83,7 @@ async function updateRaceList(races) {
   }
 }
  */
+
 /**
  * レース結果をチェック
  */
