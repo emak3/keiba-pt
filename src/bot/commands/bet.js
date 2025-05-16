@@ -128,7 +128,7 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setTitle('馬券購入履歴')
         .setColor('#0099ff')
-        .setDescription(`${interaction.user.username}さんの最近の馬券購入履歴です。`)
+        .setDescription(`${interaction.user.username}さんの最近の馬券購入履歴`)
         .setTimestamp();
 
       // レースごとにグループ化
@@ -149,7 +149,7 @@ module.exports = {
         const betContents = raceBets.map(bet => formatter.betContent(bet)).join('\n');
 
         embed.addFields({
-          name: `${race.track} ${race.number}R ${race.name}`,
+          name: `${getTrackNameFromRaceId(race.id)} ${getRaceNumberFromRaceId(race.id)}R ${race.name}`,
           value: betContents
         });
       }

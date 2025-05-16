@@ -276,46 +276,116 @@ async function getRaceResult(raceId) {
  */
 function getPayoutInfo($, selector) {
   try {
+    // 数値の取得（馬番）
     const numbers = [];
     $(selector.number).each((i, element) => {
       const num = $(element).text().trim();
-      if (num) numbers.push(parseInt(num, 10));
+      if (num) {
+        const parsedNum = parseInt(num, 10);
+        if (!isNaN(parsedNum)) {
+          numbers.push(parsedNum);
+        }
+      }
     });
-
+    
+    // 払戻金の取得 - <br>タグや改行で分割して処理
     const payouts = [];
     $(selector.pay).each((i, element) => {
-      const pay = $(element).text().trim().replace(/[^0-9]/g, '');
-      if (pay) payouts.push(parseInt(pay, 10));
+      // HTMLを取得して<br>タグを改行に変換
+      const html = $(element).html();
+      if (!html) return;
+      
+      // <br>タグを改行に置換してからテキスト化
+      const textWithBreaks = html.replace(/<br\s*\/?>/gi, '\n');
+      const payTexts = $(textWithBreaks).text().split('\n');
+      
+      payTexts.forEach(text => {
+        // 数字以外の文字を削除（円やカンマなど）
+        const pay = text.replace(/[^0-9]/g, '').trim();
+        if (pay) {
+          const parsedPay = parseInt(pay, 10);
+          if (!isNaN(parsedPay)) {
+            payouts.push(parsedPay);
+          }
+        }
+      });
     });
-
+    
+    // 人気順の取得 - 同様に改行分割を処理
     const popularities = [];
     $(selector.popularity).each((i, element) => {
-      const pop = $(element).text().trim().replace(/[^0-9]/g, '');
-      if (pop) popularities.push(parseInt(pop, 10));
+      const html = $(element).html();
+      if (!html) return;
+      
+      const textWithBreaks = html.replace(/<br\s*\/?>/gi, '\n');
+      const popTexts = $(textWithBreaks).text().split('\n');
+      
+      popTexts.forEach(text => {
+        const popMatch = text.match(/(\d+)人気/);
+        if (popMatch && popMatch[1]) {
+          const parsedPop = parseInt(popMatch[1], 10);
+          if (!isNaN(parsedPop)) {
+            popularities.push(parsedPop);
+          }
+        }
+      });
     });
 
     const result = [];
 
-    // 単勝・馬単・三連単は単一の結果
-    if (numbers.length === 1 || numbers.length === 2 || numbers.length === 3) {
-      result.push({
-        numbers,
-        payout: payouts[0] || 0,
-        popularity: popularities[0] || 0
-      });
-    }
-    // 複勝・枠連・馬連・ワイド・三連複は複数の結果がある場合がある
-    else {
-      // 3つごとにグループ化
-      for (let i = 0; i < numbers.length; i += 3) {
-        const group = numbers.slice(i, i + 3).filter(n => n);
-        if (group.length > 0) {
-          result.push({
-            numbers: group,
-            payout: payouts[Math.floor(i / 3)] || 0,
-            popularity: popularities[Math.floor(i / 3)] || 0
-          });
+    // 単勝・複勝の処理
+    if (selector.number === '.Tansho .Result div span') {
+      // 単勝は1つの馬番と1つの払戻金
+      if (numbers.length > 0 && payouts.length > 0) {
+        result.push({
+          numbers: [numbers[0]],
+          payout: payouts[0] || 0,
+          popularity: popularities[0] || 0
+        });
+      }
+    } else if (selector.number === '.Fukusho .Result div span') {
+      // 複勝の場合は馬番と払戻金の数が一致しない場合がある
+      for (let i = 0; i < Math.min(numbers.length, payouts.length); i++) {
+        result.push({
+          numbers: [numbers[i]],
+          payout: payouts[i] || 0,
+          popularity: popularities[i] || 0
+        });
+      }
+    } else if (selector.number === '.Umatan .Result ul li span' || 
+               selector.number === '.Tan3 .Result ul li span') {
+      // 馬単・3連単は順序あり
+      const count = selector.number === '.Tan3 .Result ul li span' ? 3 : 2;
+      if (numbers.length >= count && payouts.length > 0) {
+        result.push({
+          numbers: numbers.slice(0, count),
+          payout: payouts[0] || 0,
+          popularity: popularities[0] || 0
+        });
+      }
+    } else {
+      // その他の馬券タイプ（馬連・ワイド・3連複など）
+      const count = selector.number === '.Fuku3 .Result ul li span' ? 3 : 2;
+      
+      // ulタグごとにグループ化
+      const groupedNumbers = [];
+      let currentGroup = [];
+      
+      for (let i = 0; i < numbers.length; i++) {
+        currentGroup.push(numbers[i]);
+        if (currentGroup.length === count) {
+          groupedNumbers.push([...currentGroup]);
+          currentGroup = [];
         }
+      }
+      
+      // 各グループごとに払戻情報を追加
+      for (let i = 0; i < Math.min(groupedNumbers.length, payouts.length); i++) {
+        result.push({
+          numbers: groupedNumbers[i],
+          payout: payouts[i] || 0,
+          popularity: popularities[i] || 0
+        });
       }
     }
 

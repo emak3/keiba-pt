@@ -1,3 +1,6 @@
 node_modules/
 *.env
 /serviceAccountKey.json
+/fetchRaceResultTest.js
+/processBetPayoutsTest.js
+/testDirectScraping.js
