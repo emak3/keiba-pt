@@ -10,7 +10,7 @@ const {
   TextInputBuilder,
   TextInputStyle
 } = require('discord.js');
-const { getRaceById } = require('../../db/races');
+const { getTodayRaces, getRaceById } = require('../../db/races');
 const { getUserByDiscordId } = require('../../db/users');
 const { placeBet, getUserRaceBets } = require('../../db/bets');
 const { formatter } = require('../../utils/formatter');
