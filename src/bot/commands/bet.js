@@ -535,7 +535,7 @@ module.exports = {
 
       // 埋め込みを更新
       const embed = new EmbedBuilder()
-        .setTitle(`馬券購入 - ${race.track} ${race.number}R ${race.name}`)
+        .setTitle(`馬券購入 - ${getTrackNameFromRaceId(race.id)} ${getRaceNumberFromRaceId(race.id)}R ${race.name}`)
         .setColor('#0099ff')
         .setDescription(`${formatter.betTypeName(betType)}（${config.betMethods[method].name}）\n${selectionTitle}`)
         .setFooter({ text: '馬番を選択してから金額を入力してください' })
@@ -597,11 +597,20 @@ module.exports = {
 
       // 金額入力ボタンを有効化
       const components = [...interaction.message.components];
-      const buttonRow = components[components.length - 1];
-      const amountButton = buttonRow.components[0];
+      const lastRow = components[components.length - 1];
+      const oldButton = lastRow.components[0];
 
-      amountButton.setDisabled(!isSelectionComplete);
+      // 新しいButtonBuilderを作成
+      const newButton = new ButtonBuilder()
+        .setCustomId(oldButton.customId)
+        .setLabel(oldButton.label)
+        .setStyle(oldButton.style)
+        .setDisabled(!isSelectionComplete);
+      // 新しいActionRowBuilderを作成
+      const newRow = new ActionRowBuilder().addComponents(newButton);
 
+      // コンポーネント配列を更新
+      components[components.length - 1] = newRow;
       // 更新
       await interaction.update({
         embeds: [embed],
