@@ -84,5 +84,45 @@ module.exports = {
         }
       }
     }
+    else if (interaction.isModalSubmit()) {
+      // カスタムIDを解析
+      const [handler, action, ...args] = interaction.customId.split(':');
+      
+      // 対応するコマンドを取得
+      const command = interaction.client.commands.get(handler);
+      
+      if (!command || !command.handleModalSubmit) {
+        console.error(`${handler}コマンドが見つかりません、またはhandleModalSubmitメソッドがありません。`);
+        return;
+      }
+      
+      try {
+        // ユーザー情報を取得（存在しない場合は作成）
+        const user = await getUserByDiscordId(interaction.user.id);
+        
+        if (!user) {
+          await createUser({
+            discordId: interaction.user.id,
+            username: interaction.user.username
+          });
+        }
+        
+        // モーダル送信を処理
+        await command.handleModalSubmit(interaction, action, args);
+      } catch (error) {
+        console.error(`モーダル送信処理中にエラーが発生しました:`, error);
+        
+        const replyOptions = {
+          content: 'モーダル送信の処理中にエラーが発生しました。',
+          ephemeral: true
+        };
+        
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(replyOptions);
+        } else {
+          await interaction.reply(replyOptions);
+        }
+      }
+    }
   }
 };

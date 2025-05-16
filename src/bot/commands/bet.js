@@ -11,6 +11,7 @@ const {
   TextInputStyle
 } = require('discord.js');
 const { getRaceNumberFromRaceId, getTrackNameFromRaceId } = require('../../utils/track-helper');
+const { getUserBets } = require('../../db/bets');
 const { getTodayRaces, getRaceById } = require('../../db/races');
 const { getUserByDiscordId } = require('../../db/users');
 const { placeBet, getUserRaceBets } = require('../../db/bets');
@@ -182,6 +183,9 @@ module.exports = {
         break;
       case 'select_horse':
         await this.handleHorseSelection(interaction);
+        break;
+      case 'amount_modal':
+        await this.showAmountModal(interaction, args[0], args[1], args[2]);
         break;
       case 'confirm':
         await this.handleBetConfirmation(interaction);
@@ -670,6 +674,31 @@ module.exports = {
   },
 
   /**
+    * モーダル送信を処理
+    */
+  async handleModalSubmit(interaction, action, args) {
+    if (action === 'amount') {
+      // モーダルから金額を取得
+      const amount = parseInt(interaction.fields.getTextInputValue('bet_amount'), 10);
+      const [betType, method, raceId] = args;
+
+      // クライアントに保存されている選択データを取得
+      const selections = interaction.client.betSelections[interaction.user.id];
+
+      if (!selections) {
+        await interaction.reply({
+          content: '馬番選択データが見つかりません。もう一度最初からお試しください。',
+          ephemeral: true
+        });
+        return;
+      }
+
+      // 馬券購入確認画面を表示
+      await this.showBetConfirmation(interaction, betType, method, raceId, amount, selections.selectedHorses);
+    }
+  },
+
+  /**
    * 馬券購入確認画面を表示
    */
   async showBetConfirmation(interaction, betType, method, raceId, amount, selectedHorses) {
@@ -837,7 +866,7 @@ module.exports = {
 
       // 成功メッセージ
       await interaction.update({
-        content: `馬券を購入しました！ ${result.message}`,
+        content: `${result.message} `,
         embeds: [],
         components: []
       });
