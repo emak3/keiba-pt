@@ -89,8 +89,6 @@ async function getRaceDetails(raceId) {
           number = $(element).find('td').eq(1).text().trim() || '0';
         }
 
-        console.log(`馬情報取得: 枠番=${gate}, 馬番=${number}`);
-
         // 馬名取得
         let horseName = $(element).find(selectors.horseName).text().trim();
         if (!horseName) {
