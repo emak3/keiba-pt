@@ -196,21 +196,49 @@ async function saveRaceData(raceId, raceData) {
  */
 async function saveResultData(raceId, resultData) {
   try {
+    console.log(`レース結果(${raceId})の保存を開始します...`);
+    
     const db = getDb();
+    
+    // データの整合性チェック
+    if (!resultData.payouts) {
+      console.error('払戻情報が含まれていません');
+      return false;
+    }
+    
+    // 有効な払戻情報があるか確認
+    let hasValidPayouts = false;
+    for (const type in resultData.payouts) {
+      if (resultData.payouts[type] && resultData.payouts[type].length > 0) {
+        hasValidPayouts = true;
+        break;
+      }
+    }
+    
+    if (!hasValidPayouts) {
+      console.warn('有効な払戻情報が見つかりません。スクレイピングが正しく機能していない可能性があります。');
+      // それでも保存を続行
+    }
+    
+    // まずはraceResultsにデータを保存
     await db.collection('raceResults').doc(raceId).set(resultData, { merge: true });
-
-    // レースの状態を完了に更新
+    console.log(`レース結果(${raceId})をデータベースに保存しました`);
+    
+    // レースの状態を明示的に完了に更新
     await updateRaceStatus({
       id: raceId,
       isCompleted: true
     });
-
-    // 馬券の払い戻し処理を実行
-    await processBetPayouts(raceId);
-
+    console.log(`レース(${raceId})の状態を完了に更新しました`);
+    
+    // 馬券の払い戻し処理を別途実行
+    const payoutResult = await processBetPayouts(raceId);
+    console.log(`払戻処理結果: ${payoutResult ? '成功' : '失敗'}`);
+    
     return true;
   } catch (error) {
     console.error(`レース結果(${raceId})の保存中にエラーが発生しました:`, error);
+    console.error('スタックトレース:', error.stack);
     return false;
   }
 }
@@ -338,111 +366,161 @@ async function processBetPayouts(raceId) {
   try {
     console.log(`レースID: ${raceId} の馬券精算処理を開始します...`);
     const db = getDb();
-
+    
     // レース結果を取得
     const resultRef = db.collection('raceResults').doc(raceId);
     const resultDoc = await resultRef.get();
-
+    
     if (!resultDoc.exists) {
       console.error(`レース結果(${raceId})が見つかりません`);
       return false;
     }
-
+    
     const resultData = resultDoc.data();
-    const payouts = resultData.payouts;
-
-    console.log(`レース結果を取得しました。払戻情報:`, payouts);
-
-    // このレースの馬券一覧を取得
+    
+    if (!resultData.payouts) {
+      console.error(`レース結果(${raceId})に払戻情報がありません`);
+      return false;
+    }
+    
+    // 払戻情報の存在確認
+    let hasPayoutData = false;
+    for (const type in resultData.payouts) {
+      if (resultData.payouts[type] && resultData.payouts[type].length > 0) {
+        hasPayoutData = true;
+        break;
+      }
+    }
+    
+    if (!hasPayoutData) {
+      console.error(`レース結果(${raceId})に有効な払戻情報がありません`);
+      return false;
+    }
+    
+    // 未精算の馬券を取得
     const betsRef = db.collection('bets');
     const snapshot = await betsRef
       .where('raceId', '==', raceId)
       .where('settled', '==', false)
       .get();
-
+    
     console.log(`処理対象の馬券数: ${snapshot.size}件`);
-
+    
     if (snapshot.empty) {
       console.log(`処理対象の馬券がありません。`);
       return true;
     }
-
+    
     // 各馬券に対して払い戻し処理を実行
     const batch = db.batch();
     let count = 0;
-
+    let totalPayout = 0;
+    const maxBatchSize = 450; // Firestoreのバッチ上限に近い値
+    let batches = [batch];
+    let currentBatchIndex = 0;
+    
     snapshot.forEach(doc => {
       try {
         const bet = doc.data();
         let payout = 0;
-
+        
         // 馬券タイプに応じた払い戻し計算
         console.log(`馬券ID: ${doc.id}, タイプ: ${bet.type}, 番号: ${bet.numbers.join(',')}`);
-
-        // payoutsのnullチェックを追加
-        if (!payouts) {
-          console.error(`払戻情報がありません`);
-        } else if (!payouts[bet.type]) {
-          console.error(`${bet.type}の払戻情報がありません`);
-        } else {
-          switch (bet.type) {
-            case 'tansho':
-              payout = calculateTanshoPayoutAmount(bet, payouts.tansho);
-              break;
-            case 'fukusho':
-              payout = calculateFukushoPayoutAmount(bet, payouts.fukusho);
-              break;
-            case 'wakuren':
-              payout = calculateWakurenPayoutAmount(bet, payouts.wakuren);
-              break;
-            case 'umaren':
-              payout = calculateUmarenPayoutAmount(bet, payouts.umaren);
-              break;
-            case 'umatan':
-              payout = calculateUmatanPayoutAmount(bet, payouts.umatan);
-              break;
-            case 'wide':
-              payout = calculateWidePayoutAmount(bet, payouts.wide);
-              break;
-            case 'sanrentan':
-              payout = calculateSanrentanPayoutAmount(bet, payouts.sanrentan);
-              break;
-            case 'sanrenpuku':
-              payout = calculateSanrenpukuPayoutAmount(bet, payouts.sanrenpuku);
-              break;
-          }
-
-          console.log(`払戻金額: ${payout}pt`);
+        
+        switch (bet.type) {
+          case 'tansho':
+            if (resultData.payouts.tansho && resultData.payouts.tansho.length > 0) {
+              payout = calculateTanshoPayoutAmount(bet, resultData.payouts.tansho);
+            }
+            break;
+          case 'fukusho':
+            if (resultData.payouts.fukusho && resultData.payouts.fukusho.length > 0) {
+              payout = calculateFukushoPayoutAmount(bet, resultData.payouts.fukusho);
+            }
+            break;
+          case 'wakuren':
+            if (resultData.payouts.wakuren && resultData.payouts.wakuren.length > 0) {
+              payout = calculateWakurenPayoutAmount(bet, resultData.payouts.wakuren);
+            }
+            break;
+          case 'umaren':
+            if (resultData.payouts.umaren && resultData.payouts.umaren.length > 0) {
+              payout = calculateUmarenPayoutAmount(bet, resultData.payouts.umaren);
+            }
+            break;
+          case 'umatan':
+            if (resultData.payouts.umatan && resultData.payouts.umatan.length > 0) {
+              payout = calculateUmatanPayoutAmount(bet, resultData.payouts.umatan);
+            }
+            break;
+          case 'wide':
+            if (resultData.payouts.wide && resultData.payouts.wide.length > 0) {
+              payout = calculateWidePayoutAmount(bet, resultData.payouts.wide);
+            }
+            break;
+          case 'sanrentan':
+            if (resultData.payouts.sanrentan && resultData.payouts.sanrentan.length > 0) {
+              payout = calculateSanrentanPayoutAmount(bet, resultData.payouts.sanrentan);
+            }
+            break;
+          case 'sanrenpuku':
+            if (resultData.payouts.sanrenpuku && resultData.payouts.sanrenpuku.length > 0) {
+              payout = calculateSanrenpukuPayoutAmount(bet, resultData.payouts.sanrenpuku);
+            }
+            break;
         }
-
+        
+        console.log(`払戻金額: ${payout}pt`);
+        totalPayout += payout;
+        
+        // バッチサイズチェック
+        if (count >= maxBatchSize) {
+          count = 0;
+          batches.push(db.batch());
+          currentBatchIndex++;
+        }
+        
         // 馬券情報を更新
-        batch.update(doc.ref, {
+        batches[currentBatchIndex].update(doc.ref, {
           settled: true,
           payout,
           settledAt: new Date().toISOString()
         });
-
+        
         // ユーザーのポイントを更新
         if (payout > 0) {
           const userRef = db.collection('users').doc(bet.userId);
-          batch.update(userRef, {
+          batches[currentBatchIndex].update(userRef, {
             points: admin.firestore.FieldValue.increment(payout)
           });
         }
-
+        
         count++;
       } catch (betError) {
         console.error(`馬券処理中にエラー: ${betError.message}`);
       }
     });
-
+    
     // バッチ処理を実行
-    if (count > 0) {
-      console.log(`${count}件の馬券を処理します...`);
-      await batch.commit();
+    if (batches.length > 0) {
+      console.log(`${snapshot.size}件の馬券を処理します... 総払戻: ${totalPayout}pt, バッチ数: ${batches.length}`);
+      
+      for (let i = 0; i < batches.length; i++) {
+        try {
+          if (i > 0) {
+            // 連続リクエストを避けるために少し待機
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          await batches[i].commit();
+          console.log(`バッチ ${i+1}/${batches.length} コミット完了`);
+        } catch (batchError) {
+          console.error(`バッチ ${i+1} コミット中にエラー:`, batchError);
+        }
+      }
+      
       console.log(`精算処理が完了しました`);
     }
-
+    
     return true;
   } catch (error) {
     console.error(`馬券払い戻し処理(${raceId})中にエラーが発生しました:`, error);
