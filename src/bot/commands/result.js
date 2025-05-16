@@ -1,5 +1,6 @@
 // result.js - レース結果確認コマンド
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+const { getRaceNumberFromRaceId, getTrackNameFromRaceId } = require('../../utils/track-helper');
 const { getDb } = require('../../db/firebase');
 const { getTodayRaces, getRaceById } = require('../../db/races');
 const { getUserByDiscordId } = require('../../db/users');
@@ -348,7 +349,7 @@ module.exports = {
 
         embed.addFields(
           {
-            name: `${race.track} ${race.number}R ${race.name}`,
+            name: `${getTrackNameFromRaceId(race.id)} ${getRaceNumberFromRaceId(race.id)}R ${race.name}`,
             value: betContents
           },
           {

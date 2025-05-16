@@ -776,7 +776,7 @@ module.exports = {
 
       // 埋め込みを作成
       const embed = new EmbedBuilder()
-        .setTitle(`馬券購入確認 - ${race.track} ${race.number}R ${race.name}`)
+        .setTitle(`馬券購入確認 - ${getTrackNameFromRaceId(race.id)} ${getRaceNumberFromRaceId(race.id)}R ${race.name}`)
         .setColor('#00ff00')
         .setDescription(`以下の内容で馬券を購入します。よろしければ「購入する」ボタンを押してください。`)
         .addFields(
