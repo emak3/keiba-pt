@@ -252,9 +252,23 @@ export default {
               });
               history.currentDate = newDate;
 
-              // 新しい日付でコマンドを再実行
-              await i.update({ content: '読み込み中...', embeds: [], components: [] });
+              // ボタンインタラクションの更新処理
+              try {
+                await i.deferUpdate();
+              } catch (deferError) {
+                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+                // エラーが発生しても続行
+              }
 
+              // 一時的な「読み込み中」メッセージを表示
+              try {
+                await i.editReply({ content: '読み込み中...', embeds: [], components: [] });
+              } catch (editError) {
+                logger.warn(`editReply エラー (無視して続行): ${editError}`);
+                // エラーが発生しても続行
+              }
+
+              // 新しい日付でコマンドを再実行
               const command = interaction.client.commands.get('races');
               const newInteraction = {
                 ...interaction,
@@ -292,12 +306,12 @@ export default {
                 venue: null // 全体表示に戻る
               });
 
-              // Discordの応答遅延を設定
+              // セレクトメニューインタラクションの更新処理
               try {
                 await i.deferUpdate();
               } catch (deferError) {
-                logger.error(`deferUpdate エラー: ${deferError}`);
-                // 既に応答済みの場合は続行
+                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+                // エラーが発生しても続行
               }
 
               // 選択された会場のレースを表示
@@ -314,12 +328,12 @@ export default {
               if (history.previousStates.length > 0) {
                 const previousState = history.previousStates.pop();
 
-                // Discordの応答遅延を設定
+                // インタラクションの更新処理
                 try {
                   await i.deferUpdate();
                 } catch (deferError) {
-                  logger.error(`deferUpdate エラー: ${deferError}`);
-                  // 既に応答済みの場合は続行
+                  logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+                  // エラーが発生しても続行
                 }
 
                 if (previousState.venue) {
@@ -327,6 +341,12 @@ export default {
                   await displayVenueRaces(i, previousState.venue, previousState.date, history, races);
                 } else {
                   // 会場一覧に戻る
+                  try {
+                    await i.editReply({ content: '会場一覧に戻ります...', embeds: [], components: [] });
+                  } catch (editError) {
+                    logger.warn(`戻る中間メッセージエラー: ${editError}`);
+                  }
+
                   const command = interaction.client.commands.get('races');
                   const newInteraction = {
                     ...interaction,
@@ -351,27 +371,62 @@ export default {
                   await command.execute(newInteraction);
                 }
               } else {
-                // 履歴がない場合は何もしない
-                await i.update({ content: '前の画面に戻れません。' });
+                // 履歴がない場合
+                try {
+                  await i.update({ content: '前の画面に戻れません。' });
+                } catch (updateError) {
+                  logger.warn(`履歴なしエラー (次の処理にフォールバック): ${updateError}`);
+                  try {
+                    await i.editReply({ content: '前の画面に戻れません。' });
+                  } catch (editError) {
+                    logger.error(`履歴なしエラー編集失敗: ${editError}`);
+                  }
+                }
               }
             } catch (error) {
               logger.error(`戻るボタン処理エラー: ${error}`);
               handleInteractionError(i, error);
             }
           }
-          // レース選択
+          // レース選択 - 修正部分
           else if (i.customId.startsWith('races_select_race_')) {
             try {
-              // Discordの応答遅延を設定
+              // インタラクションの更新処理 - 即時応答が重要
               try {
                 await i.deferUpdate();
               } catch (deferError) {
-                logger.error(`deferUpdate エラー: ${deferError}`);
-                // 既に応答済みの場合は続行
+                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+                // エラーが発生しても続行
               }
 
+              // 値を取得し、有効性を確認
               const raceId = i.values[0];
-              await displayRaceDetail(i, raceId, targetDate, history);
+
+              if (!raceId) {
+                logger.error('レース選択: レースIDが取得できませんでした');
+                await i.editReply({
+                  content: 'レース情報の取得に失敗しました。もう一度お試しください。',
+                  components: [] // コンポーネントをクリア
+                });
+                return;
+              }
+
+              // レース情報を読み込み中であることを表示
+              try {
+                await i.editReply({
+                  content: `レース情報を読み込み中...`,
+                  embeds: [],
+                  components: []
+                });
+              } catch (editError) {
+                logger.warn(`レース情報読み込み中表示エラー: ${editError}`);
+                // エラーが発生しても続行
+              }
+
+              // レース詳細表示処理を実行
+              // 注: targetDateが未定義の場合は、履歴から日付を取得
+              const currentDate = history.currentDate || targetDate;
+              await displayRaceDetail(i, raceId, currentDate, history);
             } catch (error) {
               logger.error(`レース選択処理エラー: ${error}`);
               handleInteractionError(i, error);
@@ -380,12 +435,12 @@ export default {
           // 馬券タイプ選択
           else if (i.customId.startsWith('bet_select_type_')) {
             try {
-              // Discordの応答遅延を設定
+              // インタラクションの更新処理
               try {
                 await i.deferUpdate();
               } catch (deferError) {
-                logger.error(`deferUpdate エラー: ${deferError}`);
-                // 既に応答済みの場合は続行
+                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+                // エラーが発生しても続行
               }
 
               const [_, __, ___, raceId] = i.customId.split('_');
@@ -396,8 +451,114 @@ export default {
               handleInteractionError(i, error);
             }
           }
-          // その他のインタラクション処理...
-          // (略)
+          // 馬券購入方法選択
+          else if (i.customId.startsWith('bet_select_method_')) {
+            try {
+              // インタラクションの更新処理
+              try {
+                await i.deferUpdate();
+              } catch (deferError) {
+                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+                // エラーが発生しても続行
+              }
+
+              const [_, __, ___, raceId, betType] = i.customId.split('_');
+              const method = i.values[0];
+              await displayHorseSelection(i, raceId, betType, method);
+            } catch (error) {
+              logger.error(`購入方法選択処理エラー: ${error}`);
+              handleInteractionError(i, error);
+            }
+          }
+          // 馬選択
+          else if (i.customId.startsWith('bet_select_horses_')) {
+            try {
+              // インタラクションの更新処理
+              try {
+                await i.deferUpdate();
+              } catch (deferError) {
+                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+                // エラーが発生しても続行
+              }
+
+              const [_, __, ___, raceId, betType, method] = i.customId.split('_');
+              const selectedHorses = i.values.map(value => parseInt(value, 10));
+
+              // フォーメーション購入の場合は特別な処理
+              if (method === 'formation' && (betType === 'umatan' || betType === 'sanrentan')) {
+                // フォーメーション選択関数がある場合はコメントアウトを外す
+                // await displayFormationSelection(i, raceId, betType, method, selectedHorses);
+                await displayBetAmountInput(i, raceId, betType, method, selectedHorses);
+              } else {
+                await displayBetAmountInput(i, raceId, betType, method, selectedHorses);
+              }
+            } catch (error) {
+              logger.error(`馬選択処理エラー: ${error}`);
+              handleInteractionError(i, error);
+            }
+          }
+          // 馬券確認/キャンセル
+          else if (i.customId.startsWith('bet_confirm_') || i.customId === 'bet_cancel') {
+            try {
+              // キャンセル
+              if (i.customId === 'bet_cancel') {
+                try {
+                  await i.update({
+                    content: '馬券購入をキャンセルしました。',
+                    embeds: [],
+                    components: []
+                  });
+                } catch (updateError) {
+                  logger.warn(`キャンセル処理エラー: ${updateError}`);
+                  // フォールバック処理
+                  try {
+                    await i.editReply({
+                      content: '馬券購入をキャンセルしました。',
+                      embeds: [],
+                      components: []
+                    });
+                  } catch (editError) {
+                    logger.error(`キャンセル編集エラー: ${editError}`);
+                  }
+                }
+                return;
+              }
+
+              // インタラクションの更新処理
+              try {
+                await i.deferUpdate();
+              } catch (deferError) {
+                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+                // エラーが発生しても続行
+              }
+
+              // 処理を続行
+              // customIdからパラメータを取得
+              const params = i.customId.split('_');
+              if (params.length >= 6) {
+                const raceId = params[2];
+                const betType = params[3];
+                const method = params[4];
+                const amount = params[5];
+                const horsesString = params[6] || '';
+
+                const selectedHorses = horsesString.split(',').map(num => parseInt(num.trim(), 10));
+
+                // 馬券購入処理を実行
+                await processBetPurchase(i, raceId, betType, method, selectedHorses, parseInt(amount, 10));
+              } else {
+                logger.error(`馬券確認: 不正なパラメータ形式: ${i.customId}`);
+                await i.editReply({
+                  content: '馬券情報の処理中にエラーが発生しました。もう一度お試しください。',
+                  embeds: [],
+                  components: []
+                });
+              }
+            } catch (error) {
+              logger.error(`馬券確認処理エラー: ${error}`);
+              handleInteractionError(i, error);
+            }
+          }
         } catch (error) {
           logger.error(`インタラクション処理全体でのエラー: ${error}`);
           handleInteractionError(i, error);
@@ -406,25 +567,52 @@ export default {
 
       async function handleInteractionError(interaction, error) {
         try {
-          // インタラクションの状態に応じて適切な方法でエラーメッセージを表示
-          if (interaction.deferred || interaction.replied) {
-            // 既に応答済みの場合はフォローアップ
+          // インタラクションの状態に基づいて適切な方法でエラーメッセージを表示
+          if (interaction.replied) {
+            // 既に応答済みならフォローアップを試行
             await interaction.followUp({
               content: 'エラーが発生しました。もう一度操作をお試しください。',
               ephemeral: true
             });
-          } else {
-            // 未応答の場合は応答
-            await interaction.reply({
+          } else if (interaction.deferred) {
+            // 遅延応答済みなら編集を試行
+            await interaction.editReply({
               content: 'エラーが発生しました。もう一度操作をお試しください。',
-              ephemeral: true
             });
+          } else {
+            // 未応答かつ未遅延ならupdateかreplyを試行
+            if (typeof interaction.update === 'function') {
+              try {
+                await interaction.update({
+                  content: 'エラーが発生しました。もう一度操作をお試しください。',
+                });
+              } catch (updateError) {
+                try {
+                  await interaction.reply({
+                    content: 'エラーが発生しました。もう一度操作をお試しください。',
+                    ephemeral: true
+                  });
+                } catch (replyError) {
+                  logger.error(`応答失敗: ${replyError}`);
+                }
+              }
+            } else {
+              try {
+                await interaction.reply({
+                  content: 'エラーが発生しました。もう一度操作をお試しください。',
+                  ephemeral: true
+                });
+              } catch (replyError) {
+                logger.error(`応答失敗: ${replyError}`);
+              }
+            }
           }
         } catch (responseError) {
           logger.error(`エラー通知中の二次エラー: ${responseError}`);
           // これ以上何もできない
         }
       }
+
       collector.on('end', () => {
         // コレクターの終了時に行う処理（オプション）
       });
@@ -508,99 +696,119 @@ function cleanVenueName(venue) {
  * @param {Array} allRaces - すべてのレース一覧（既に取得済み）
  */
 async function displayVenueRaces(interaction, venueCode, dateString, history, allRaces) {
-  // 会場コードに合致するレースを抽出
-  const venueRaces = allRaces.filter(race => extractVenueCode(race.id) === venueCode);
+  try {
+    // 会場コードに合致するレースを抽出
+    const venueRaces = allRaces.filter(race => extractVenueCode(race.id) === venueCode);
 
-  // レースが見つからない場合
-  if (venueRaces.length === 0) {
-    return await interaction.editReply({
-      content: `選択された会場のレース情報が見つかりませんでした。`,
-      embeds: [],
-      components: []
+    // レースが見つからない場合
+    if (venueRaces.length === 0) {
+      return await interaction.editReply({
+        content: `選択された会場のレース情報が見つかりませんでした。`,
+        embeds: [],
+        components: []
+      });
+    }
+
+    // 日付の表示用フォーマット
+    const displayDate = `${dateString.slice(0, 4)}年${dateString.slice(4, 6)}月${dateString.slice(6, 8)}日`;
+
+    // 会場名と開催回を取得
+    const firstRace = venueRaces[0];
+    const venueName = venueCodeMap[venueCode] || cleanVenueName(firstRace.venue);
+
+    // 開催回情報を抽出
+    let roundInfo = '';
+    const roundMatch = firstRace.venue.match(/([\d]+回.+[\d]+日目)/);
+    if (roundMatch) {
+      roundInfo = ` (${roundMatch[1]})`;
+    }
+
+    // 会場種別（JRAかNARか）
+    const venueType = parseInt(venueCode) >= 1 && parseInt(venueCode) <= 10 ? 'JRA' : 'NAR';
+
+    // レース一覧のエンベッド
+    const raceListEmbed = new EmbedBuilder()
+      .setTitle(`${displayDate} ${venueName}${roundInfo}（${venueType}）レース一覧`)
+      .setColor(venueType === 'JRA' ? 0x00b0f4 : 0xf47200)
+      .setTimestamp();
+
+    let description = '';
+
+    // レース一覧を整形
+    venueRaces.forEach(race => {
+      const statusEmoji = getStatusEmoji(race.status);
+      description += `${statusEmoji} **${race.number}R** ${race.time} 【${race.name}】\n`;
+      description += `→ レースID: \`${race.id}\`\n\n`;
     });
+
+    raceListEmbed.setDescription(description);
+
+    // レース選択メニュー
+    const raceSelectRow = new ActionRowBuilder()
+      .addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`races_select_race_${dateString}`)
+          .setPlaceholder('レースを選択してください')
+          .addOptions(
+            venueRaces.map(race => ({
+              label: `${race.number}R ${race.name.substring(0, 80)}`, // 名前が長すぎる場合は切り詰め
+              value: race.id,
+              description: `発走時刻: ${race.time}`.substring(0, 100), // 説明が長すぎる場合は切り詰め
+              emoji: getStatusEmoji(race.status)
+            }))
+          )
+      );
+
+    // 戻るボタン
+    const backRow = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(`races_back_${dateString}`)
+          .setLabel('会場一覧に戻る')
+          .setStyle(ButtonStyle.Primary)
+      );
+
+    // 前日・翌日ボタン
+    const prevDate = dayjs(dateString).subtract(1, 'day').format('YYYYMMDD');
+    const nextDate = dayjs(dateString).add(1, 'day').format('YYYYMMDD');
+
+    const navigationRow = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(`races_prev_${prevDate}`)
+          .setLabel('前日')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`races_next_${nextDate}`)
+          .setLabel('翌日')
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+    // レスポンスを更新
+    try {
+      await interaction.editReply({
+        content: `${displayDate} ${venueName}${roundInfo}（${venueType}）のレース一覧（${venueRaces.length}件）\nレースを選択して馬券を購入できます。`,
+        embeds: [raceListEmbed],
+        components: [raceSelectRow, backRow, navigationRow]
+      });
+    } catch (editError) {
+      logger.error(`レスポンス更新エラー: ${editError}`);
+      // フォールバックとしてフォローアップを試す
+      try {
+        await interaction.followUp({
+          content: `${displayDate} ${venueName}${roundInfo}（${venueType}）のレース一覧（${venueRaces.length}件）\nレースを選択して馬券を購入できます。`,
+          embeds: [raceListEmbed],
+          components: [raceSelectRow, backRow, navigationRow],
+          ephemeral: false
+        });
+      } catch (followUpError) {
+        logger.error(`フォローアップ更新もエラー: ${followUpError}`);
+      }
+    }
+  } catch (error) {
+    logger.error(`会場別レース一覧表示中にエラーが発生しました: ${error}`);
+    throw error; // 上位の handleInteractionError で処理されるよう再スロー
   }
-
-  // 日付の表示用フォーマット
-  const displayDate = `${dateString.slice(0, 4)}年${dateString.slice(4, 6)}月${dateString.slice(6, 8)}日`;
-
-  // 会場名と開催回を取得
-  const firstRace = venueRaces[0];
-  const venueName = venueCodeMap[venueCode] || cleanVenueName(firstRace.venue);
-
-  // 開催回情報を抽出
-  let roundInfo = '';
-  const roundMatch = firstRace.venue.match(/([\d]+回.+[\d]+日目)/);
-  if (roundMatch) {
-    roundInfo = ` (${roundMatch[1]})`;
-  }
-
-  // 会場種別（JRAかNARか）
-  const venueType = parseInt(venueCode) >= 1 && parseInt(venueCode) <= 10 ? 'JRA' : 'NAR';
-
-  // レース一覧のエンベッド
-  const raceListEmbed = new EmbedBuilder()
-    .setTitle(`${displayDate} ${venueName}${roundInfo}（${venueType}）レース一覧`)
-    .setColor(venueType === 'JRA' ? 0x00b0f4 : 0xf47200)
-    .setTimestamp();
-
-  let description = '';
-
-  // レース一覧を整形
-  venueRaces.forEach(race => {
-    const statusEmoji = getStatusEmoji(race.status);
-    description += `${statusEmoji} **${race.number}R** ${race.time} 【${race.name}】\n`;
-    description += `→ レースID: \`${race.id}\`\n\n`;
-  });
-
-  raceListEmbed.setDescription(description);
-
-  // レース選択メニュー
-  const raceSelectRow = new ActionRowBuilder()
-    .addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId(`races_select_race_${dateString}`)
-        .setPlaceholder('レースを選択してください')
-        .addOptions(
-          venueRaces.map(race => ({
-            label: `${race.number}R ${race.name}`,
-            value: race.id,
-            description: `発走時刻: ${race.time}`,
-            emoji: getStatusEmoji(race.status)
-          }))
-        )
-    );
-
-  // 戻るボタン
-  const backRow = new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId(`races_back_${dateString}`)
-        .setLabel('会場一覧に戻る')
-        .setStyle(ButtonStyle.Primary)
-    );
-
-  // 前日・翌日ボタン
-  const prevDate = dayjs(dateString).subtract(1, 'day').format('YYYYMMDD');
-  const nextDate = dayjs(dateString).add(1, 'day').format('YYYYMMDD');
-
-  const navigationRow = new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId(`races_prev_${prevDate}`)
-        .setLabel('前日')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(`races_next_${nextDate}`)
-        .setLabel('翌日')
-        .setStyle(ButtonStyle.Secondary)
-    );
-
-  // レスポンスを更新
-  await interaction.editReply({
-    content: `${displayDate} ${venueName}${roundInfo}（${venueType}）のレース一覧（${venueRaces.length}件）\nレースを選択して馬券を購入できます。`,
-    embeds: [raceListEmbed],
-    components: [raceSelectRow, backRow, navigationRow]
-  });
 }
 
 /**
@@ -611,17 +819,17 @@ async function displayVenueRaces(interaction, venueCode, dateString, history, al
 async function fetchHorsesForRace(raceId) {
   try {
     logger.info(`レース ${raceId} の出走馬情報を取得します`);
-    
+
     // レース種別を判定（最初の3桁が202なら中央、203なら地方）
     const raceType = raceId.substring(0, 3) === '202' ? 'jra' : 'nar';
-    
+
     // オッズ情報を強制的に取得するためのフラグ
     const forceOddsRefresh = true;
-    
+
     // 既存のレース情報を取得
     const existingRace = await getRaceById(raceId);
     const hasExistingHorses = existingRace && existingRace.horses && existingRace.horses.length > 0;
-    
+
     // 馬情報の過去のオッズデータを保持
     let existingOddsMap = new Map();
     if (hasExistingHorses) {
@@ -634,26 +842,26 @@ async function fetchHorsesForRace(raceId) {
         }
       });
     }
-    
+
     // スクレイピング用のURLを構築
-    const baseUrl = raceType === 'jra' 
-      ? 'https://race.netkeiba.com/race/shutuba.html?race_id=' 
+    const baseUrl = raceType === 'jra'
+      ? 'https://race.netkeiba.com/race/shutuba.html?race_id='
       : 'https://nar.netkeiba.com/race/shutuba.html?race_id=';
-    
+
     const url = `${baseUrl}${raceId}`;
     logger.info(`スクレイピングURL: ${url}`);
-    
+
     // 出走馬情報の取得
     let horses = [];
     let oddsRefreshed = false;
-    
+
     try {
       // 種別に応じたスクレイピング関数を呼び出し
       if (raceType === 'jra') {
         // JRAの出走馬情報取得のためにモジュールをインポート
         const { fetchJraHorsesEnhanced } = await import('../services/scraper/enhancedScraper.js');
         horses = await fetchJraHorsesEnhanced(raceId);
-        
+
         // オッズ情報が取得できなかった場合、既存データと結合
         if (horses && horses.length > 0) {
           const hasOdds = horses.some(h => h.odds && h.odds > 0);
@@ -673,20 +881,20 @@ async function fetchHorsesForRace(raceId) {
             oddsRefreshed = true;
           }
         }
-        
+
         // オッズページから追加情報を取得（オプション）
         if (forceOddsRefresh && !oddsRefreshed) {
           try {
             const { fetchJraOddsEnhanced } = await import('../services/scraper/enhancedScraper.js');
             const oddsData = await fetchJraOddsEnhanced(raceId);
-            
+
             if (oddsData && oddsData.length > 0) {
               // 馬番ごとのマップを作成
               const oddsMap = new Map();
               oddsData.forEach(item => {
                 oddsMap.set(item.horseNumber, item);
               });
-              
+
               // オッズ情報を統合
               horses = horses.map(horse => {
                 if (horse.horseNumber > 0 && oddsMap.has(horse.horseNumber)) {
@@ -699,7 +907,7 @@ async function fetchHorsesForRace(raceId) {
                 }
                 return horse;
               });
-              
+
               oddsRefreshed = true;
             }
           } catch (oddsError) {
@@ -710,7 +918,7 @@ async function fetchHorsesForRace(raceId) {
         // NARの出走馬情報取得のためにモジュールをインポート
         const { fetchNarHorsesEnhanced } = await import('../services/scraper/enhancedScraper.js');
         horses = await fetchNarHorsesEnhanced(raceId);
-        
+
         // オッズ情報が取得できなかった場合、既存データと結合
         if (horses && horses.length > 0) {
           const hasOdds = horses.some(h => h.odds && h.odds > 0);
@@ -730,20 +938,20 @@ async function fetchHorsesForRace(raceId) {
             oddsRefreshed = true;
           }
         }
-        
+
         // NAR用のオッズページから追加情報を取得（オプション）
         if (forceOddsRefresh && !oddsRefreshed) {
           try {
             const { fetchNarOddsEnhanced } = await import('../services/scraper/enhancedScraper.js');
             const oddsData = await fetchNarOddsEnhanced(raceId);
-            
+
             if (oddsData && oddsData.length > 0) {
               // 馬番ごとのマップを作成
               const oddsMap = new Map();
               oddsData.forEach(item => {
                 oddsMap.set(item.horseNumber, item);
               });
-              
+
               // オッズ情報を統合
               horses = horses.map(horse => {
                 if (horse.horseNumber > 0 && oddsMap.has(horse.horseNumber)) {
@@ -756,7 +964,7 @@ async function fetchHorsesForRace(raceId) {
                 }
                 return horse;
               });
-              
+
               oddsRefreshed = true;
             }
           } catch (oddsError) {
@@ -764,23 +972,23 @@ async function fetchHorsesForRace(raceId) {
           }
         }
       }
-      
+
       // 無効なエントリーをフィルタリング
       if (horses && horses.length > 0) {
-        horses = horses.filter(horse => 
-          horse.horseNumber > 0 && 
-          horse.horseName && 
-          horse.horseName !== '番馬' && 
+        horses = horses.filter(horse =>
+          horse.horseNumber > 0 &&
+          horse.horseName &&
+          horse.horseName !== '番馬' &&
           horse.horseName !== '不明'
         );
-        
+
         // 出走馬情報の妥当性をチェック
         const maxHorseNumber = Math.max(...horses.map(h => h.horseNumber));
-        
+
         // 馬番が上限を超えるエントリを除外
         if (maxHorseNumber > 0) {
           const raceEntries = horses.filter(h => h.horseNumber <= maxHorseNumber);
-          
+
           // 本当に出走する馬だけを保持
           if (raceEntries.length < horses.length) {
             logger.info(`レース ${raceId} の出走馬情報を整理しました: ${horses.length}頭 → ${raceEntries.length}頭`);
@@ -788,26 +996,26 @@ async function fetchHorsesForRace(raceId) {
           }
         }
       }
-      
+
       // 結果をログに出力
       if (horses && horses.length > 0) {
         logger.info(`レース ${raceId} から ${horses.length}頭の出走馬情報を取得しました`);
-        
+
         // 情報欠落チェック
         const missingOdds = horses.filter(h => !h.odds || h.odds === 0).length;
         const missingJockey = horses.filter(h => !h.jockey || h.jockey === '騎手不明').length;
-        
+
         if (missingOdds > 0 || missingJockey > 0) {
           logger.warn(`情報欠落: オッズなし=${missingOdds}頭, 騎手情報なし=${missingJockey}頭`);
         }
       } else {
         logger.warn(`レース ${raceId} の出走馬情報が取得できませんでした`);
       }
-      
+
       // レース情報を更新
       if (horses && horses.length > 0) {
         const { saveJraRace, saveNarRace } = await import('../services/database/raceService.js');
-        
+
         if (raceType === 'jra') {
           await saveJraRace({
             id: raceId,
@@ -821,13 +1029,13 @@ async function fetchHorsesForRace(raceId) {
             type: 'nar'
           });
         }
-        
+
         logger.info(`レース ${raceId} の出走馬情報をデータベースに保存しました`);
       }
     } catch (scrapingError) {
       logger.error(`出走馬情報のスクレイピング中にエラーが発生しました: ${scrapingError}`);
     }
-    
+
     return horses;
   } catch (error) {
     logger.error(`出走馬情報取得中にエラーが発生しました: ${error}`);
@@ -846,7 +1054,7 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
   try {
     // レース情報を取得
     const race = await getRaceById(raceId);
-    
+
     if (!race) {
       return await interaction.editReply({
         content: `レースID ${raceId} の情報が見つかりませんでした。`,
@@ -854,7 +1062,7 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
         components: []
       });
     }
-    
+
     // レースステータスチェック
     if (race.status === 'completed') {
       return await interaction.editReply({
@@ -863,19 +1071,19 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
         components: []
       });
     }
-    
+
     // レース発走時間の2分前かどうかをチェック
     const now = new Date();
     const raceTime = new Date(
-      race.date.slice(0, 4), 
-      parseInt(race.date.slice(4, 6)) - 1, 
-      race.date.slice(6, 8), 
-      race.time.split(':')[0], 
+      race.date.slice(0, 4),
+      parseInt(race.date.slice(4, 6)) - 1,
+      race.date.slice(6, 8),
+      race.time.split(':')[0],
       race.time.split(':')[1]
     );
-    
+
     const twoMinutesBefore = new Date(raceTime.getTime() - 2 * 60 * 1000);
-    
+
     if (now > twoMinutesBefore) {
       return await interaction.editReply({
         content: `このレースは発走2分前を過ぎているため、馬券を購入できません。`,
@@ -883,18 +1091,18 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
         components: []
       });
     }
-    
+
     // レース詳細のエンベッド
     const raceEmbed = new EmbedBuilder()
       .setTitle(`🏇 ${race.venue} ${race.number}R ${race.name}`)
       .setDescription(`発走時刻: ${race.time}\nレースID: ${race.id}`)
       .setColor(race.type === 'jra' ? 0x00b0f4 : 0xf47200)
       .setTimestamp();
-    
+
     // 出走馬情報
     let horsesInfo = '';
     let horses = race.horses || [];
-    
+
     // 出走馬情報がない場合は取得を試みる
     if (!horses || horses.length === 0) {
       await interaction.editReply({
@@ -902,10 +1110,10 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
         embeds: [],
         components: []
       });
-      
+
       // 出走馬情報を取得
       horses = await fetchHorsesForRace(raceId);
-      
+
       // レース情報を再取得（horses情報が更新されているはず）
       if (horses && horses.length > 0) {
         const updatedRace = await getRaceById(raceId);
@@ -917,46 +1125,46 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
         }
       }
     }
-    
+
     if (horses && horses.length > 0) {
       // 無効なエントリーを除外
-      const validHorses = horses.filter(horse => 
-        horse.horseNumber > 0 && 
-        horse.horseName && 
-        horse.horseName !== '番馬' && 
+      const validHorses = horses.filter(horse =>
+        horse.horseNumber > 0 &&
+        horse.horseName &&
+        horse.horseName !== '番馬' &&
         horse.horseName !== '不明' &&
         horse.jockey
       );
-      
+
       // 馬番が最大値を超えているエントリを除外
       const maxHorseNumber = Math.max(...validHorses.map(h => h.horseNumber));
       const filteredHorses = validHorses.filter(h => h.horseNumber <= maxHorseNumber);
-      
+
       // 適切な見出しを追加
       horsesInfo = `**【出走馬一覧】** (${filteredHorses.length}頭)\n\n`;
-      
+
       // 馬番でソート
       const sortedHorses = [...filteredHorses].sort((a, b) => a.horseNumber - b.horseNumber);
-      
-      // 表示を改善
+
+      // 要求された新しいフォーマットで表示
       sortedHorses.forEach(horse => {
-        let horseString = `**${horse.horseNumber}番**: ${horse.horseName}\n`;
-        horseString += `　騎手: ${horse.jockey || '不明'}\n`;
-        
+        // 枠番と馬番の表示（「枠番がない場合は?」という条件を含む）
+        let horseString = `**${horse.frameNumber || '?'}枠${horse.horseNumber}番**: ${horse.horseName}\n`;
+console.log(`うんこーーーーーーーーーーーーーーーーーーーーーーーーーーーー: ${horse.odds} - ${horse.popularity}`)
+        // 騎手情報の表示
+        horseString += `　${horse.jockey || '不明'}`;
+
         // オッズ情報を表示（情報があれば）
         if (horse.odds && horse.odds > 0) {
-          horseString += `　オッズ: ${horse.odds}倍`;
+          horseString += ` (${horse.odds}倍)`;
           if (horse.popularity && horse.popularity > 0) {
-            horseString += ` (人気: ${horse.popularity})`;
+            horseString += ` - ${horse.popularity}人気`;
           }
-        } else {
-          // オッズがない場合は枠番を表示
-          horseString += `　枠番: ${horse.frameNumber || '不明'}`;
         }
-        
+
         horsesInfo += horseString + '\n\n';
       });
-      
+
       // 長すぎる場合は適切に省略
       if (horsesInfo.length > 1024) {
         // 表示限界に合わせて適切に切り詰める
@@ -965,9 +1173,9 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
     } else {
       horsesInfo = '出走馬情報を取得できませんでした。';
     }
-    
+
     raceEmbed.addFields({ name: '出走馬', value: horsesInfo });
-    
+
     // 馬券種類選択メニュー
     const betTypeRow = new ActionRowBuilder()
       .addComponents(
@@ -985,7 +1193,7 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
             { label: '三連単', value: 'sanrentan', description: '1着から3着までの馬を当てる（順序通り）', emoji: '💯' }
           ])
       );
-    
+
     // 戻るボタン
     const backRow = new ActionRowBuilder()
       .addComponents(
@@ -994,13 +1202,13 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
           .setLabel('レース一覧に戻る')
           .setStyle(ButtonStyle.Secondary)
       );
-    
+
     await interaction.editReply({
       content: `レース詳細と馬券購入画面です。馬券を購入するには、まず馬券の種類を選択してください。`,
       embeds: [raceEmbed],
       components: [betTypeRow, backRow]
     });
-    
+
   } catch (error) {
     logger.error(`レース詳細表示中にエラーが発生しました: ${error}`);
     await interaction.editReply({ content: '詳細の取得中にエラーが発生しました。' });
@@ -1124,7 +1332,7 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
   try {
     // レース情報を取得
     const race = await getRaceById(raceId);
-    
+
     if (!race) {
       return await interaction.editReply({
         content: `レースID ${raceId} の情報が見つかりませんでした。`,
@@ -1132,7 +1340,7 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
         components: []
       });
     }
-    
+
     // 馬券情報の表示用データ
     const betTypeNames = {
       tansho: '単勝',
@@ -1144,29 +1352,29 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
       sanrenpuku: '三連複',
       sanrentan: '三連単'
     };
-    
+
     const methodNames = {
       normal: '通常',
       box: 'ボックス',
       formation: 'フォーメーション'
     };
-    
+
     // 馬券タイプに応じた最大選択数を取得
     const maxSelections = getMaxSelectionsForBet(betType, method);
-    
+
     // 出走馬情報がない場合は取得
     let horses = race.horses && race.horses.length > 0 ? race.horses : [];
-    
+
     if (!horses || horses.length === 0) {
       await interaction.editReply({
         content: `出走馬情報を取得中...`,
         embeds: [],
         components: []
       });
-      
+
       // 出走馬情報を取得
       horses = await fetchHorsesForRace(raceId);
-      
+
       if (!horses || horses.length === 0) {
         // ダミーデータ
         horses = [];
@@ -1181,28 +1389,28 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
         }
       }
     }
-    
+
     // 無効なエントリーをフィルタリング
-    const validHorses = horses.filter(horse => 
-      horse.horseNumber > 0 && 
-      horse.horseName && 
-      horse.horseName !== '番馬' && 
+    const validHorses = horses.filter(horse =>
+      horse.horseNumber > 0 &&
+      horse.horseName &&
+      horse.horseName !== '番馬' &&
       horse.horseName !== '不明'
     );
-    
+
     // 馬番が最大値を超えているエントリを除外（例：16頭立てなのに17,18があるケース）
     const maxHorseNumber = Math.max(...validHorses.map(h => h.horseNumber));
     const filteredHorses = validHorses.filter(h => h.horseNumber <= maxHorseNumber);
-    
+
     // 出走馬の選択肢を作成
     const horseOptions = [];
-    
+
     // 出走馬情報に基づいてオプションを作成
     filteredHorses.sort((a, b) => a.horseNumber - b.horseNumber);
-    
+
     filteredHorses.forEach(horse => {
       let description = `騎手: ${horse.jockey || '情報なし'}`;
-      
+
       // オッズ情報があれば表示
       if (horse.odds && horse.odds > 0) {
         description += ` / オッズ: ${horse.odds}倍`;
@@ -1210,14 +1418,14 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
           description += ` (${horse.popularity}人気)`;
         }
       }
-      
+
       horseOptions.push({
         label: `${horse.horseNumber}番: ${horse.horseName}`,
         description: description,
         value: `${horse.horseNumber}`
       });
     });
-    
+
     // 馬選択メニュー
     const horseSelectRow = new ActionRowBuilder()
       .addComponents(
@@ -1228,7 +1436,7 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
           .setMaxValues(maxSelections)
           .addOptions(horseOptions)
       );
-    
+
     // 戻るボタン
     const backRow = new ActionRowBuilder()
       .addComponents(
@@ -1237,17 +1445,17 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
           .setLabel('購入方法選択に戻る')
           .setStyle(ButtonStyle.Secondary)
       );
-    
+
     // 馬券選択のエンベッド
     const betEmbed = new EmbedBuilder()
       .setTitle(`🏇 馬券購入 - ${race.venue} ${race.number}R ${race.name}`)
       .setDescription(`**${betTypeNames[betType]}**（${methodNames[method]}）の馬券を購入します。`)
       .setColor(0x00b0f4)
       .setTimestamp();
-    
+
     // 馬券タイプごとの説明
     let explanation = '';
-    
+
     switch (betType) {
       case 'tansho':
         explanation = '「単勝」は、1着になる馬を当てる馬券です。1頭を選択してください。';
@@ -1274,7 +1482,7 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
         explanation = '「三連単」は、1着から3着までの馬を順序通りに当てる馬券です。3頭を選択してください（1番目=1着、2番目=2着、3番目=3着）。';
         break;
     }
-    
+
     // 購入方法ごとの追加説明
     if (method === 'box') {
       explanation += '\n\n「ボックス」購入では、選択した馬の全ての組み合わせを購入します。';
@@ -1285,23 +1493,23 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
         explanation += '\n\n「フォーメーション」購入では、複数の馬を選択して組み合わせを購入します。';
       }
     }
-    
+
     if (method === 'formation' && (betType === 'umatan' || betType === 'sanrentan')) {
       // フォーメーション特殊処理（次の画面でさらに詳細設定）
       explanation += '\n\n次の画面で1着、2着、3着（三連単の場合）の馬を指定します。この画面では対象となる全ての馬を選択してください。';
     }
-    
+
     betEmbed.addFields(
       { name: '馬券の説明', value: explanation },
       { name: '選択数', value: `最低${getMinSelectionsForBet(betType)}頭、最大${maxSelections}頭まで選択できます。` }
     );
-    
+
     await interaction.editReply({
       content: `${betTypeNames[betType]}（${methodNames[method]}）の馬券購入で、馬を選択してください。`,
       embeds: [betEmbed],
       components: [horseSelectRow, backRow]
     });
-    
+
   } catch (error) {
     logger.error(`馬選択画面表示中にエラーが発生しました: ${error}`);
     await interaction.editReply({ content: '馬選択画面の表示中にエラーが発生しました。' });

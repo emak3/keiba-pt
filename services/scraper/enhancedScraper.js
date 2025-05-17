@@ -360,14 +360,45 @@ export async function fetchJraHorsesEnhanced(raceId) {
 
         // 出走馬テーブルを処理
         $('.HorseList').each((index, element) => {
-            const frameNumber = $(element).find('.Waku').text().trim();
-            const horseNumber = $(element).find('.Umaban').text().trim();
+            // 枠番 - Waku1, Waku2 などのクラスから取得
+            const frameNumberElement = $(element).find('[class^="Waku"]').first();
+            const frameNumber = frameNumberElement.find('span').text().trim() || frameNumberElement.text().trim();
+            
+            // 馬番 - Umaban1, Umaban2 などのクラスから取得
+            const horseNumberElement = $(element).find('[class^="Umaban"]').first();
+            const horseNumber = horseNumberElement.text().trim();
+            
+            // 馬名
             const horseName = $(element).find('.HorseName a').text().trim();
+            
+            // 騎手
             const jockey = $(element).find('.Jockey a').text().trim();
+            
+            // 調教師
             const trainer = $(element).find('.Trainer a').text().trim();
+            
+            // 馬体重
             const weight = $(element).find('.Weight').text().trim();
-            const odds = $(element).find('.Popular span').first().text().trim();
-            const popularity = $(element).find('.Popular_Ninki span').text().trim();
+            
+            // オッズ - 複数のパターンに対応
+            let odds = '';
+            const oddsElement = $(element).find('.Popular span[id^="odds-"]');
+            if (oddsElement.length > 0) {
+                odds = oddsElement.text().trim();
+            } else {
+                const altOddsElement = $(element).find('.Txt_R');
+                odds = altOddsElement.text().trim().replace(/[^\d\.]/g, '');
+            }
+            
+            // 人気 - 複数のパターンに対応
+            let popularity = '';
+            const popularityElement = $(element).find('.Popular_Ninki span[id^="ninki-"]');
+            if (popularityElement.length > 0) {
+                popularity = popularityElement.text().trim();
+            } else {
+                const altPopularityElement = $(element).find('.Popular.Txt_C span');
+                popularity = altPopularityElement.text().trim();
+            }
 
             // 馬名の文字化けチェック
             const hasGarbledName = /[\uFFFD\u30FB\u309A-\u309C]/.test(horseName) ||
@@ -435,14 +466,10 @@ export async function fetchNarHorsesEnhanced(raceId) {
         
         // 各行を処理
         horseRows.each((index, element) => {
-            // 枠番と馬番の複数セレクタを試行
-            const frameSelectors = ['.Waku', '.Waku1', '.Waku2', '.Waku3', '.Waku4', '.Waku5', '.Waku6', '.Waku7', '.Waku8', 'td:nth-child(1)'];
-            const horseNumSelectors = ['.Umaban', '.Umaban1', '.Umaban2', '.Umaban3', '.Umaban4', '.Umaban5', '.Umaban6', '.Umaban7', '.Umaban8', 'td:nth-child(2)'];
-            
+            // 枠番 - 複数のパターンに対応
             let frameNumber = '';
-            let horseNumber = '';
+            const frameSelectors = ['[class^="Waku"]', '.Waku', 'td:nth-child(1)'];
             
-            // 枠番の抽出
             for (const selector of frameSelectors) {
                 const cell = $(element).find(selector);
                 if (cell.length > 0) {
@@ -451,7 +478,10 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 }
             }
             
-            // 馬番の抽出
+            // 馬番 - 複数のパターンに対応
+            let horseNumber = '';
+            const horseNumSelectors = ['[class^="Umaban"]', '.Umaban', 'td:nth-child(2)'];
+            
             for (const selector of horseNumSelectors) {
                 const cell = $(element).find(selector);
                 if (cell.length > 0) {
@@ -460,32 +490,57 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 }
             }
             
-            // 馬名、騎手、調教師の抽出
+            // 馬名、騎手、調教師の抽出 - 複数のパターンに対応
             const horseName = $(element).find('.HorseName a, td:nth-child(4) a').first().text().trim();
             const jockey = $(element).find('.Jockey a, td:nth-child(7) a').first().text().trim();
             const trainer = $(element).find('.Trainer a, td:nth-child(9) a').first().text().trim();
             const weight = $(element).find('.Weight, td:nth-child(12)').first().text().trim();
             
-            // オッズと人気の抽出
+            // オッズと人気の抽出 - 複数のパターンに対応
             let odds = '';
             let popularity = '';
             
-            const oddsSelectors = ['.Popular.Txt_R', '.Odds', 'td:nth-child(10)'];
-            const popularitySelectors = ['.Popular.Txt_C span', '.Popular span', 'td:nth-child(11)'];
+            // オッズ - 複数のセレクタを試行
+            const oddsSelectors = [
+                '.Popular span[id^="odds-"]',
+                '.Odds',
+                '.Txt_R',
+                'td:nth-child(10)',
+                '.Popular.Txt_R'
+            ];
             
             for (const selector of oddsSelectors) {
                 const cell = $(element).find(selector);
                 if (cell.length > 0) {
-                    odds = cell.text().trim().replace(/[^\d\.]/g, '');
-                    if (odds) break;
+                    // 余分な空白や文字を削除してオッズを抽出
+                    const text = cell.text().trim();
+                    const match = text.match(/\d+\.\d+|\d+/);
+                    if (match) {
+                        odds = match[0];
+                        break;
+                    }
                 }
             }
+            
+            // 人気 - 複数のセレクタを試行
+            const popularitySelectors = [
+                '.Popular_Ninki span[id^="ninki-"]',
+                '.Popular span',
+                '.Txt_C span',
+                'td:nth-child(11)',
+                '.Popular.Txt_C span'
+            ];
             
             for (const selector of popularitySelectors) {
                 const cell = $(element).find(selector);
                 if (cell.length > 0) {
-                    popularity = cell.text().trim().replace(/\D/g, '');
-                    if (popularity) break;
+                    // 余分な空白や文字を削除して人気順を抽出
+                    const text = cell.text().trim();
+                    const match = text.match(/\d+/);
+                    if (match) {
+                        popularity = match[0];
+                        break;
+                    }
                 }
             }
 
