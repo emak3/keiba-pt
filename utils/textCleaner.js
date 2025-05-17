@@ -93,30 +93,7 @@ export function cleanVenueName(venue) {
  * @returns {string} 文字セット名
  */
 export function detectCharset(response) {
-  // Content-Typeヘッダーからcharsetを抽出
-  const contentType = response.headers['content-type'] || '';
-  const charsetMatch = contentType.match(/charset=([^;]+)/i);
-
-  if (charsetMatch) {
-    const charset = charsetMatch[1].trim().toLowerCase();
-    return charset;
-  }
-
-  // バイナリデータとしてのレスポンスからHTMLのmetaタグを確認
-  try {
-    // いったんUTF-8として解釈
-    const tempHtml = response.data.toString('utf-8').slice(0, 10000); // 先頭10000文字だけ確認
-    const metaCharset = tempHtml.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
-
-    if (metaCharset) {
-      const charset = metaCharset[1].trim().toLowerCase();
-      return charset;
-    }
-  } catch (error) {
-    // エラーがあっても続行
-  }
-
-  // ネットケイバは基本的にEUC-JPを使用していることが多い
+  // ネットケイバは基本的にEUC-JPを使用
   return 'euc-jp';
 }
 

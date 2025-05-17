@@ -30,27 +30,32 @@ const axiosConfig = recommendedAxiosConfig;
 async function fetchAndParse(url, debugFileName) {
   logger.info(`JRAデータを取得中: ${url}`);
 
-  const response = await axios.get(url, axiosConfig);
-  
-  // 文字コードを動的に検出
-  const charset = detectCharset(response);
-  logger.debug(`検出された文字コード: ${charset}`);
+  // axiosの設定をシンプル化
+  const config = {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Charset': 'utf-8, euc-jp, shift_jis'
+    },
+    responseType: 'arraybuffer'
+  };
 
-  // レスポンスを検出された文字コードで変換
-  const html = iconv.decode(Buffer.from(response.data), charset);
-
-  // デバッグ用にHTMLを保存
-  const debugDir = path.join(process.cwd(), 'debug');
-  if (!fs.existsSync(debugDir)) {
-    fs.mkdirSync(debugDir);
-  }
+  const response = await axios.get(url, config);
   
+  // 直接EUC-JPでデコード（ネットケイバ標準エンコーディング）
+  const html = iconv.decode(Buffer.from(response.data), 'EUC-JP');
+
+  // デバッグ用にHTMLを保存（オプション）
   if (debugFileName) {
+    const debugDir = path.join(process.cwd(), 'debug');
+    if (!fs.existsSync(debugDir)) {
+      fs.mkdirSync(debugDir);
+    }
     fs.writeFileSync(path.join(debugDir, debugFileName), html, 'utf-8');
   }
 
   // Cheerioでパース
-  const $ = cheerio.load(html);
+  const $ = cheerio.load(html, { decodeEntities: false });
   
   return { html, $ };
 }

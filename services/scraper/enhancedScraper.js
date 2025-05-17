@@ -1,6 +1,3 @@
-// services/scraper/enhancedScraper.js
-// 強化されたスクレイピング処理 - 文字コード問題解決版
-
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import dayjs from 'dayjs';
@@ -17,63 +14,44 @@ import { saveJraRace, saveNarRace } from '../database/raceService.js';
  * @returns {string} 文字セット名
  */
 function detectCharset(response) {
-  // HTTP헤더で宣言されたCharsetを確認
-  const contentType = response.headers['content-type'] || '';
-  const charsetMatch = contentType.match(/charset=([^;]+)/i);
-  
-  if (charsetMatch) {
-    const charset = charsetMatch[1].trim().toLowerCase();
-    logger.debug(`Content-Typeヘッダーから文字セット検出: ${charset}`);
-    return charset;
-  }
-  
-  try {
-    // metaタグで宣言されたcharsetを検出（UTF-8でまず試してみる）
-    const utf8Sample = iconv.decode(Buffer.from(response.data), 'utf-8');
-    const metaCharsetMatch = utf8Sample.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
-    
-    if (metaCharsetMatch) {
-      const charset = metaCharsetMatch[1].trim().toLowerCase();
-      logger.debug(`metaタグから文字セット検出: ${charset}`);
-      return charset;
-    }
-    
-    // EUC-JPで試してみる
-    const eucJpSample = iconv.decode(Buffer.from(response.data), 'euc-jp');
-    const eucMetaCharsetMatch = eucJpSample.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
-    
-    if (eucMetaCharsetMatch) {
-      const charset = eucMetaCharsetMatch[1].trim().toLowerCase();
-      logger.debug(`EUC-JP解釈からmeta文字セット検出: ${charset}`);
-      return charset;
-    }
-  } catch (error) {
-    logger.debug(`metaタグからの文字セット検出に失敗: ${error}`);
-  }
-  
-  // netkeiba.comはEUC-JPを使っていることが多い
-  logger.debug(`文字セットが検出できませんでした。netkeiba.comのため、EUC-JPを使用します。`);
-  return 'euc-jp';
-}
+    // HTTP헤더で宣言されたCharsetを確認
+    const contentType = response.headers['content-type'] || '';
+    const charsetMatch = contentType.match(/charset=([^;]+)/i);
 
-/**
- * 強化されたHTTPリクエスト設定
- * @type {Object}
- */
-const enhancedAxiosConfig = {
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-    'Accept-Charset': 'euc-jp, shift_jis, utf-8, iso-8859-1;q=0.9',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache',
-    'Referer': 'https://www.netkeiba.com/'
-  },
-  responseType: 'arraybuffer',  // バイナリデータとして取得
-  responseEncoding: 'binary',
-  timeout: 30000 // 30秒のタイムアウト
-};
+    if (charsetMatch) {
+        const charset = charsetMatch[1].trim().toLowerCase();
+        logger.debug(`Content-Typeヘッダーから文字セット検出: ${charset}`);
+        return charset;
+    }
+
+    try {
+        // metaタグで宣言されたcharsetを検出（UTF-8でまず試してみる）
+        const utf8Sample = iconv.decode(Buffer.from(response.data), 'utf-8');
+        const metaCharsetMatch = utf8Sample.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
+
+        if (metaCharsetMatch) {
+            const charset = metaCharsetMatch[1].trim().toLowerCase();
+            logger.debug(`metaタグから文字セット検出: ${charset}`);
+            return charset;
+        }
+
+        // EUC-JPで試してみる
+        const eucJpSample = iconv.decode(Buffer.from(response.data), 'euc-jp');
+        const eucMetaCharsetMatch = eucJpSample.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
+
+        if (eucMetaCharsetMatch) {
+            const charset = eucMetaCharsetMatch[1].trim().toLowerCase();
+            logger.debug(`EUC-JP解釈からmeta文字セット検出: ${charset}`);
+            return charset;
+        }
+    } catch (error) {
+        logger.debug(`metaタグからの文字セット検出に失敗: ${error}`);
+    }
+
+    // netkeiba.comはEUC-JPを使っていることが多い
+    logger.debug(`文字セットが検出できませんでした。netkeiba.comのため、EUC-JPを使用します。`);
+    return 'euc-jp';
+}
 
 /**
  * 強化版スクレイピング処理
@@ -90,60 +68,34 @@ async function fetchAndParse(url, debugFilename = null) {
   
   while (retryCount < maxRetries) {
     try {
-      // 1. リクエスト実行
-      const response = await axios.get(url, enhancedAxiosConfig);
+      // リクエスト設定をシンプル化
+      const config = {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept-Charset': 'utf-8, euc-jp, shift_jis'
+        },
+        responseType: 'arraybuffer'
+      };
       
-      // 2. 文字コード検出
-      const charset = detectCharset(response);
-      logger.debug(`検出された文字コード: ${charset}`);
+      // リクエスト実行
+      const response = await axios.get(url, config);
       
-      // 3. データの変換と確認
-      let html;
-      try {
-        html = iconv.decode(Buffer.from(response.data), charset);
-      } catch (encodeError) {
-        logger.error(`${charset}でのデコードに失敗: ${encodeError}, EUC-JPを試します`);
-        html = iconv.decode(Buffer.from(response.data), 'euc-jp');
-      }
+      // 直接EUC-JPでデコード
+      const html = iconv.decode(Buffer.from(response.data), 'EUC-JP');
       
-      // 4. デバッグ用にファイル保存
+      // デバッグ用にファイル保存
       if (debugFilename) {
         const debugDir = path.join(process.cwd(), 'debug');
         if (!fs.existsSync(debugDir)) {
           fs.mkdirSync(debugDir);
         }
         
-        // 生のバイナリデータを保存
-        fs.writeFileSync(path.join(debugDir, `raw_${debugFilename}.bin`), response.data);
-        
         // デコードしたHTMLを保存
         fs.writeFileSync(path.join(debugDir, debugFilename), html, 'utf-8');
-        
-        // 文字化けチェック
-        const hasGarbledText = /[\uFFFD\u30FB\u309A-\u309C]/.test(html) || 
-                              html.includes('��') || 
-                              html.includes('□') ||
-                              html.includes('�');
-        
-        if (hasGarbledText) {
-          logger.warn(`${debugFilename}に文字化けが検出されました。別の文字コードを試します。`);
-          
-          // 別の文字コードでも試してみる
-          const charsets = ['shift_jis', 'utf-8', 'iso-2022-jp'];
-          for (const altCharset of charsets) {
-            if (altCharset === charset) continue;
-            
-            try {
-              const altHtml = iconv.decode(Buffer.from(response.data), altCharset);
-              fs.writeFileSync(path.join(debugDir, `${altCharset}_${debugFilename}`), altHtml, 'utf-8');
-            } catch (e) {
-              logger.error(`${altCharset}での変換に失敗: ${e}`);
-            }
-          }
-        }
       }
       
-      // 5. Cheerioでパース
+      // Cheerioでパース
       const $ = cheerio.load(html, {
         decodeEntities: false // HTML実体参照をデコードしない
       });
@@ -172,7 +124,7 @@ async function fetchAndParse(url, debugFilename = null) {
  * @returns {string} YYYYMMDD形式の日付
  */
 function getTodayDateString() {
-  return dayjs().format('YYYYMMDD');
+    return dayjs().format('YYYYMMDD');
 }
 
 /**
@@ -181,91 +133,91 @@ function getTodayDateString() {
  * @returns {Promise<Array>} レース一覧
  */
 export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()) {
-  try {
-    const url = `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=${dateString}`;
-    const debugFilename = `jra_${dateString}_${uuidv4().substring(0, 8)}.html`;
-    
-    // 強化版の取得・パース処理
-    const { $ } = await fetchAndParse(url, debugFilename);
-    
-    const races = [];
-    
-    // 競馬場ごとに処理
-    $('.RaceList_Box').each((venueIndex, venueElement) => {
-      // 競馬場名を取得
-      const venueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
-      logger.debug(`競馬場${venueIndex + 1}: ${venueName}`);
-      
-      // 各レースを処理
-      $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
-        // レース番号
-        const raceNumber = $(raceElement).find('.Race_Num').text().trim().replace(/\D/g, '');
-        
-        // レース時間
-        let raceTime = '';
-        const timeSelectors = ['.RaceData span', '.RaceData', '.RaceList_Itemtime'];
-        
-        for (const selector of timeSelectors) {
-          const timeElement = $(raceElement).find(selector);
-          if (timeElement.length > 0) {
-            const timeText = timeElement.text().trim();
-            const match = timeText.match(/(\d{1,2}:\d{2})/);
-            if (match) {
-              raceTime = match[1];
-              break;
-            }
-          }
+    try {
+        const url = `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=${dateString}`;
+        const debugFilename = `jra_${dateString}_${uuidv4().substring(0, 8)}.html`;
+
+        // 強化版の取得・パース処理
+        const { $ } = await fetchAndParse(url, debugFilename);
+
+        const races = [];
+
+        // 競馬場ごとに処理
+        $('.RaceList_Box').each((venueIndex, venueElement) => {
+            // 競馬場名を取得
+            const venueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
+            logger.debug(`競馬場${venueIndex + 1}: ${venueName}`);
+
+            // 各レースを処理
+            $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
+                // レース番号
+                const raceNumber = $(raceElement).find('.Race_Num').text().trim().replace(/\D/g, '');
+
+                // レース時間
+                let raceTime = '';
+                const timeSelectors = ['.RaceData span', '.RaceData', '.RaceList_Itemtime'];
+
+                for (const selector of timeSelectors) {
+                    const timeElement = $(raceElement).find(selector);
+                    if (timeElement.length > 0) {
+                        const timeText = timeElement.text().trim();
+                        const match = timeText.match(/(\d{1,2}:\d{2})/);
+                        if (match) {
+                            raceTime = match[1];
+                            break;
+                        }
+                    }
+                }
+
+                // レース名
+                const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
+
+                // レースID取得
+                const raceLink = $(raceElement).find('a').attr('href');
+                const raceIdMatch = raceLink ? raceLink.match(/race_id=([0-9]+)/) : null;
+                const raceId = raceIdMatch ? raceIdMatch[1] : null;
+
+                if (raceId) {
+                    // レース情報をログ出力
+                    logger.debug(`レース情報: ${raceNumber}R ${raceName} (${raceTime}) ID:${raceId}`);
+
+                    // 文字化けチェック
+                    const hasGarbledName = /[\uFFFD\u30FB\u309A-\u309C]/.test(raceName) ||
+                        raceName.includes('��') ||
+                        raceName.includes('□') ||
+                        raceName.includes('�');
+
+                    if (hasGarbledName) {
+                        logger.warn(`レース名が文字化けしている可能性: ${raceName}`);
+                    }
+
+                    races.push({
+                        id: raceId,
+                        type: 'jra',
+                        venue: venueName,
+                        number: parseInt(raceNumber, 10) || raceIndex + 1,
+                        name: raceName,
+                        time: raceTime,
+                        date: dateString,
+                        status: 'upcoming',
+                        link: `https://race.netkeiba.com/race/shutuba.html?race_id=${raceId}`
+                    });
+                }
+            });
+        });
+
+        logger.info(`JRA: ${dateString} の ${races.length} 件のレースを取得しました。`);
+
+        // データベースに保存
+        if (races.length > 0) {
+            await Promise.all(races.map(race => saveJraRace(race)));
         }
-        
-        // レース名
-        const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
-        
-        // レースID取得
-        const raceLink = $(raceElement).find('a').attr('href');
-        const raceIdMatch = raceLink ? raceLink.match(/race_id=([0-9]+)/) : null;
-        const raceId = raceIdMatch ? raceIdMatch[1] : null;
-        
-        if (raceId) {
-          // レース情報をログ出力
-          logger.debug(`レース情報: ${raceNumber}R ${raceName} (${raceTime}) ID:${raceId}`);
-          
-          // 文字化けチェック
-          const hasGarbledName = /[\uFFFD\u30FB\u309A-\u309C]/.test(raceName) || 
-                                raceName.includes('��') || 
-                                raceName.includes('□') ||
-                                raceName.includes('�');
-          
-          if (hasGarbledName) {
-            logger.warn(`レース名が文字化けしている可能性: ${raceName}`);
-          }
-          
-          races.push({
-            id: raceId,
-            type: 'jra',
-            venue: venueName,
-            number: parseInt(raceNumber, 10) || raceIndex + 1,
-            name: raceName,
-            time: raceTime,
-            date: dateString,
-            status: 'upcoming',
-            link: `https://race.netkeiba.com/race/shutuba.html?race_id=${raceId}`
-          });
-        }
-      });
-    });
-    
-    logger.info(`JRA: ${dateString} の ${races.length} 件のレースを取得しました。`);
-    
-    // データベースに保存
-    if (races.length > 0) {
-      await Promise.all(races.map(race => saveJraRace(race)));
+
+        return races;
+    } catch (error) {
+        logger.error(`JRAレース一覧取得中にエラー: ${error}`);
+        throw error;
     }
-    
-    return races;
-  } catch (error) {
-    logger.error(`JRAレース一覧取得中にエラー: ${error}`);
-    throw error;
-  }
 }
 
 /**
@@ -274,91 +226,91 @@ export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()
  * @returns {Promise<Array>} レース一覧
  */
 export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()) {
-  try {
-    const url = `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=${dateString}`;
-    const debugFilename = `nar_${dateString}_${uuidv4().substring(0, 8)}.html`;
-    
-    // 強化版の取得・パース処理
-    const { $ } = await fetchAndParse(url, debugFilename);
-    
-    const races = [];
-    
-    // 競馬場ごとに処理
-    $('.RaceList_Box').each((venueIndex, venueElement) => {
-      // 競馬場名を取得
-      const venueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
-      logger.debug(`競馬場${venueIndex + 1}: ${venueName}`);
-      
-      // 各レースを処理
-      $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
-        // レース番号
-        const raceNumber = $(raceElement).find('.Race_Num').text().trim().replace(/\D/g, '');
-        
-        // レース時間
-        let raceTime = '';
-        const timeSelectors = ['.RaceData span', '.RaceData', '.RaceList_Itemtime'];
-        
-        for (const selector of timeSelectors) {
-          const timeElement = $(raceElement).find(selector);
-          if (timeElement.length > 0) {
-            const timeText = timeElement.text().trim();
-            const match = timeText.match(/(\d{1,2}:\d{2})/);
-            if (match) {
-              raceTime = match[1];
-              break;
-            }
-          }
+    try {
+        const url = `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=${dateString}`;
+        const debugFilename = `nar_${dateString}_${uuidv4().substring(0, 8)}.html`;
+
+        // 強化版の取得・パース処理
+        const { $ } = await fetchAndParse(url, debugFilename);
+
+        const races = [];
+
+        // 競馬場ごとに処理
+        $('.RaceList_Box').each((venueIndex, venueElement) => {
+            // 競馬場名を取得
+            const venueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
+            logger.debug(`競馬場${venueIndex + 1}: ${venueName}`);
+
+            // 各レースを処理
+            $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
+                // レース番号
+                const raceNumber = $(raceElement).find('.Race_Num').text().trim().replace(/\D/g, '');
+
+                // レース時間
+                let raceTime = '';
+                const timeSelectors = ['.RaceData span', '.RaceData', '.RaceList_Itemtime'];
+
+                for (const selector of timeSelectors) {
+                    const timeElement = $(raceElement).find(selector);
+                    if (timeElement.length > 0) {
+                        const timeText = timeElement.text().trim();
+                        const match = timeText.match(/(\d{1,2}:\d{2})/);
+                        if (match) {
+                            raceTime = match[1];
+                            break;
+                        }
+                    }
+                }
+
+                // レース名
+                const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
+
+                // レースID取得
+                const raceLink = $(raceElement).find('a').attr('href');
+                const raceIdMatch = raceLink ? raceLink.match(/race_id=([0-9]+)/) : null;
+                const raceId = raceIdMatch ? raceIdMatch[1] : null;
+
+                if (raceId) {
+                    // レース情報をログ出力
+                    logger.debug(`レース情報: ${raceNumber}R ${raceName} (${raceTime}) ID:${raceId}`);
+
+                    // 文字化けチェック
+                    const hasGarbledName = /[\uFFFD\u30FB\u309A-\u309C]/.test(raceName) ||
+                        raceName.includes('��') ||
+                        raceName.includes('□') ||
+                        raceName.includes('�');
+
+                    if (hasGarbledName) {
+                        logger.warn(`レース名が文字化けしている可能性: ${raceName}`);
+                    }
+
+                    races.push({
+                        id: raceId,
+                        type: 'nar',
+                        venue: venueName,
+                        number: parseInt(raceNumber, 10) || raceIndex + 1,
+                        name: raceName,
+                        time: raceTime,
+                        date: dateString,
+                        status: 'upcoming',
+                        link: `https://nar.netkeiba.com/race/shutuba.html?race_id=${raceId}`
+                    });
+                }
+            });
+        });
+
+        logger.info(`NAR: ${dateString} の ${races.length} 件のレースを取得しました。`);
+
+        // データベースに保存
+        if (races.length > 0) {
+            await Promise.all(races.map(race => saveNarRace(race)));
         }
-        
-        // レース名
-        const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
-        
-        // レースID取得
-        const raceLink = $(raceElement).find('a').attr('href');
-        const raceIdMatch = raceLink ? raceLink.match(/race_id=([0-9]+)/) : null;
-        const raceId = raceIdMatch ? raceIdMatch[1] : null;
-        
-        if (raceId) {
-          // レース情報をログ出力
-          logger.debug(`レース情報: ${raceNumber}R ${raceName} (${raceTime}) ID:${raceId}`);
-          
-          // 文字化けチェック
-          const hasGarbledName = /[\uFFFD\u30FB\u309A-\u309C]/.test(raceName) || 
-                                raceName.includes('��') || 
-                                raceName.includes('□') ||
-                                raceName.includes('�');
-          
-          if (hasGarbledName) {
-            logger.warn(`レース名が文字化けしている可能性: ${raceName}`);
-          }
-          
-          races.push({
-            id: raceId,
-            type: 'nar',
-            venue: venueName,
-            number: parseInt(raceNumber, 10) || raceIndex + 1,
-            name: raceName,
-            time: raceTime,
-            date: dateString,
-            status: 'upcoming',
-            link: `https://nar.netkeiba.com/race/shutuba.html?race_id=${raceId}`
-          });
-        }
-      });
-    });
-    
-    logger.info(`NAR: ${dateString} の ${races.length} 件のレースを取得しました。`);
-    
-    // データベースに保存
-    if (races.length > 0) {
-      await Promise.all(races.map(race => saveNarRace(race)));
+
+        return races;
+    } catch (error) {
+        logger.error(`NARレース一覧取得中にエラー: ${error}`);
+        throw error;
     }
-    
-    return races;
-  } catch (error) {
-    logger.error(`NARレース一覧取得中にエラー: ${error}`);
-    throw error;
-  }
 }
 
 // その他必要な強化版関数も同様に実装...
