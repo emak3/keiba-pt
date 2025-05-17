@@ -7,58 +7,53 @@ import fs from 'fs';
 import path from 'path';
 import iconv from 'iconv-lite';
 
-// textCleaner.js をインポート
-import * as textCleaner from '../../utils/textCleaner.js';
-const { cleanJapaneseText, cleanVenueName, cleanRaceName } = textCleaner;
+// 修正: 必要な関数をすべてインポート
+import { 
+  detectCharset, 
+  validateRaceName, 
+  validateVenueName, 
+  cleanJapaneseText, // 後方互換用
+  cleanRaceName, // 後方互換用 
+  cleanVenueName, // 後方互換用
+  recommendedAxiosConfig 
+} from '../../utils/textCleaner.js';
+
+// HTTP リクエスト用のヘッダーを更新
+const axiosConfig = recommendedAxiosConfig;
 
 /**
- * レスポンスの文字セットを検出
- * @param {Object} response - Axiosレスポンス
- * @returns {string} 文字セット名
+ * JRA レース情報を取得する関数
+ * @param {string} url - 取得するURL
+ * @param {string} debugFileName - デバッグ用のファイル名
+ * @returns {Promise<{html: string, $: CheerioStatic}>} HTML文字列とCheerioオブジェクト
  */
-function detectCharset(response) {
-  // Content-Typeヘッダーからcharsetを抽出
-  const contentType = response.headers['content-type'] || '';
-  const charsetMatch = contentType.match(/charset=([^;]+)/i);
+async function fetchAndParse(url, debugFileName) {
+  logger.info(`JRAデータを取得中: ${url}`);
 
-  if (charsetMatch) {
-    const charset = charsetMatch[1].trim().toLowerCase();
-    logger.debug(`Content-Typeヘッダーから文字セット検出: ${charset}`);
-    return charset;
+  const response = await axios.get(url, axiosConfig);
+  
+  // 文字コードを動的に検出
+  const charset = detectCharset(response);
+  logger.debug(`検出された文字コード: ${charset}`);
+
+  // レスポンスを検出された文字コードで変換
+  const html = iconv.decode(Buffer.from(response.data), charset);
+
+  // デバッグ用にHTMLを保存
+  const debugDir = path.join(process.cwd(), 'debug');
+  if (!fs.existsSync(debugDir)) {
+    fs.mkdirSync(debugDir);
+  }
+  
+  if (debugFileName) {
+    fs.writeFileSync(path.join(debugDir, debugFileName), html, 'utf-8');
   }
 
-  // バイナリデータとしてのレスポンスからHTMLのmetaタグを確認
-  try {
-    // いったんUTF-8として解釈
-    const tempHtml = iconv.decode(Buffer.from(response.data), 'utf-8');
-    const metaCharset = tempHtml.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
-
-    if (metaCharset) {
-      const charset = metaCharset[1].trim().toLowerCase();
-      logger.debug(`HTMLのmetaタグから文字セット検出: ${charset}`);
-      return charset;
-    }
-  } catch (error) {
-    logger.debug(`metaタグからの文字セット検出に失敗: ${error}`);
-  }
-
-  // ネットケイバは基本的にEUC-JPを使用していることが多い
-  logger.debug('文字セットが検出できなかったため、デフォルトのEUC-JPを使用します');
-  return 'euc-jp';
+  // Cheerioでパース
+  const $ = cheerio.load(html);
+  
+  return { html, $ };
 }
-
-// HTTP リクエスト用のヘッダーを設定
-const axiosConfig = {
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache'
-  },
-  responseType: 'arraybuffer',  // バイナリデータとして取得
-  responseEncoding: 'binary'
-};
 
 /**
  * 今日の日付を「YYYYMMDD」形式で取得
@@ -76,29 +71,12 @@ function getTodayDateString() {
 export async function fetchJraRaceList(dateString = getTodayDateString()) {
   try {
     const url = `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=${dateString}`;
-    logger.info(`JRAレース情報を取得中: ${url}`);
-
-    const response = await axios.get(url, axiosConfig);
-
-    // ネットケイバはEUC-JPを使用しているため、強制的に指定
-    const charset = 'euc-jp';
-    logger.debug(`レスポンスの文字コードを ${charset} として処理します`);
-
-    // レスポンスをUTF-8に変換
-    const html = iconv.decode(Buffer.from(response.data), charset);
-
-    // デバッグ用にHTMLを保存
-    const debugDir = path.join(process.cwd(), 'debug');
-    if (!fs.existsSync(debugDir)) {
-      fs.mkdirSync(debugDir);
-    }
-    fs.writeFileSync(path.join(debugDir, `jra_${dateString}.html`), html, 'utf-8');
-
-    const $ = cheerio.load(html);
+    
+    // fetchAndParse関数を使用してHTMLを取得とパース
+    const { $ } = await fetchAndParse(url, `jra_${dateString}.html`);
     const races = [];
 
     // HTMLの構造を確認
-    logger.debug(`JRA HTML取得: ドキュメントのサイズ ${response.data.length} バイト`);
     logger.debug(`JRA HTML構造: .RaceList_Box 要素の数: ${$('.RaceList_Box').length}`);
 
     // 競馬場ごとのレース情報を抽出
@@ -127,10 +105,8 @@ export async function fetchJraRaceList(dateString = getTodayDateString()) {
           raceTime = $(raceElement).find('.RaceList_Itemtime').text().trim();
         }
 
-        logger.debug(`レース時間: ${raceTime}`);
-
         // レース名を取得 - JRAはRaceList_ItemTitleの中にあるItemTitle
-        const raceName = cleanJapaneseText($(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim());
+        const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
 
         logger.debug(`レース情報解析中: 番号=${raceNumber}, 時間=${raceTime}, 名前=${raceName}`);
 
@@ -142,12 +118,17 @@ export async function fetchJraRaceList(dateString = getTodayDateString()) {
         if (raceId) {
           logger.debug(`レース情報: ${raceNumber}R ${raceName} (${raceTime}) ID:${raceId}`);
 
+          // 検証済みのレース名と開催場所を使用（後方互換性のため、cleanVenueName, cleanRaceName を使用）
+          const validatedVenue = cleanVenueName(venueName);
+          // レース名の処理 - 文字化けしていない限り、元のレース名を維持
+          const validatedRaceName = cleanRaceName(raceName, validatedVenue, parseInt(raceNumber, 10));
+
           races.push({
             id: raceId,
             type: 'jra',
-            venue: venueName,
+            venue: validatedVenue,
             number: parseInt(raceNumber, 10),
-            name: raceName,
+            name: validatedRaceName,
             time: raceTime,
             date: dateString,
             status: 'upcoming', // upcoming, in_progress, completed

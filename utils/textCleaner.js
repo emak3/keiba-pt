@@ -1,11 +1,21 @@
 /**
- * 文字化け対策のユーティリティ関数
+ * 文字列のバリデーションチェック
+ * @param {string} text - チェックする文字列
+ * @returns {boolean} 有効な文字列かどうか
  */
+export function isValidJapaneseText(text) {
+  if (!text) return false;
+  
+  // 明らかに文字化けしている場合はfalseを返す
+  if (/[\uFFFD\u30FB\u309A-\u309C]/.test(text) && text.length > 3) {
+    return false;
+  }
+  
+  return true;
+}
 
 /**
- * 文字化けした文字列をクリーンアップ
- * @param {string} text - クリーンアップする文字列
- * @returns {string} クリーンアップされた文字列
+ * 後方互換性のための関数 - 既存のコードがまだこの関数を使用している場合のため
  */
 export function cleanJapaneseText(text) {
   if (!text) return '';
@@ -33,97 +43,94 @@ export function cleanJapaneseText(text) {
 }
 
 /**
- * レース名のクリーンアップと代替テキスト提供
+ * レース名のシンプルな検証
  * @param {string} raceName - レース名
  * @param {string} venue - 開催場所
  * @param {number} number - レース番号
- * @returns {string} クリーンアップされたレース名または代替テキスト
+ * @returns {string} 検証済みのレース名または代替テキスト
  */
-export function cleanRaceName(raceName, venue, number) {
-  const cleaned = cleanJapaneseText(raceName);
-  
-  // 文字化けしているか空の場合は、代替テキストを提供
-  if (!cleaned || cleaned.length < 2) {
-    // クラスとレース番号による代替名
-    const classMap = {
-      1: '新馬',
-      2: '未勝利',
-      3: '1勝クラス',
-      4: '2勝クラス', 
-      5: '3勝クラス',
-      6: 'オープン'
-    };
-    
-    const raceClass = classMap[Math.min(Math.floor(number / 2) + 1, 6)] || 'レース';
-    return `${venue} ${number}R ${raceClass}`;
+export function validateRaceName(raceName, venue, number) {
+  // 無効な場合のみ代替テキストを提供し、有効な場合は元のレース名を使用
+  if (!isValidJapaneseText(raceName) || !raceName || raceName.length < 2) {
+    // 元のレース名を保持しようとする
+    return `${venue} ${number}R`;
   }
   
-  return cleaned;
+  return raceName;
 }
 
 /**
- * レース場名のクリーンアップと代替テキスト提供
- * @param {string} venue - 開催場所
- * @returns {string} クリーンアップされた開催場所または代替テキスト
+ * 後方互換性のための関数 - 既存のコードがまだこの関数を使用している場合のため
  */
-export function cleanVenueName(venue) {
-  const cleaned = cleanJapaneseText(venue);
-  console.log(`うんこおおおおおおおおおおおおおおおおおおおおおおおおおおおおおおおおおお: ${venue}`)
-  // 文字化けしているか空の場合は、レース場コードから推測
-  if (!cleaned || cleaned.length < 2) {
+export function cleanRaceName(raceName, venue, number) {
+  return validateRaceName(raceName, venue, number);
+}
+
+/**
+ * レース場名のシンプルな検証
+ * @param {string} venue - 開催場所
+ * @returns {string} 検証済みの開催場所または代替テキスト
+ */
+export function validateVenueName(venue) {
+  // 無効な場合は未知として扱う
+  if (!isValidJapaneseText(venue) || !venue || venue.length < 2) {
     return '不明';
   }
   
-  // 主要な競馬場名の部分一致による修正
-  const venueKeywords = {
-    '01': '札幌',
-        '02': '函館',
-        '03': '福島',
-        '04': '新潟',
-        '05': '東京',
-        '06': '中山',
-        '07': '中京',
-        '08': '京都',
-        '09': '阪神',
-        '10': '小倉',
-        '31': '北見',
-        '32': '岩見沢',
-        '33': '帯広',
-        '34': '旭川',
-        '35': '盛岡',
-        '36': '水沢',
-        '37': '上山',
-        '38': '三条',
-        '39': '足利',
-        '40': '宇都宮',
-        '41': '高崎',
-        '42': '浦和',
-        '43': '船橋',
-        '44': '大井',
-        '45': '川崎',
-        '46': '金沢',
-        '47': '笠松',
-        '48': '名古屋',
-        '49': '(未使用競馬場)',
-        '50': '園田',
-        '51': '姫路',
-        '52': '益田',
-        '53': '福山',
-        '54': '高知',
-        '55': '佐賀',
-        '56': '荒尾',
-        '57': '中津',
-        '58': '札幌(地方競馬)',
-        '59': '函館(地方競馬)',
-        '60': '新潟(地方競馬)',
-        '61': '中京(地方競馬)'
-  };
-  
-  for (const [keyword, replacement] of Object.entries(venueKeywords)) {
-    if (cleaned.includes(keyword)) {
-      return replacement;
-    }
-  }
-  
-  return cleaned;
+  return venue;
 }
+
+/**
+ * 後方互換性のための関数 - 既存のコードがまだこの関数を使用している場合のため
+ */
+export function cleanVenueName(venue) {
+  return validateVenueName(venue);
+}
+
+/**
+ * レスポンスの文字セットを検出
+ * @param {Object} response - Axiosレスポンス
+ * @returns {string} 文字セット名
+ */
+export function detectCharset(response) {
+  // Content-Typeヘッダーからcharsetを抽出
+  const contentType = response.headers['content-type'] || '';
+  const charsetMatch = contentType.match(/charset=([^;]+)/i);
+
+  if (charsetMatch) {
+    const charset = charsetMatch[1].trim().toLowerCase();
+    return charset;
+  }
+
+  // バイナリデータとしてのレスポンスからHTMLのmetaタグを確認
+  try {
+    // いったんUTF-8として解釈
+    const tempHtml = response.data.toString('utf-8').slice(0, 10000); // 先頭10000文字だけ確認
+    const metaCharset = tempHtml.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
+
+    if (metaCharset) {
+      const charset = metaCharset[1].trim().toLowerCase();
+      return charset;
+    }
+  } catch (error) {
+    // エラーがあっても続行
+  }
+
+  // ネットケイバは基本的にEUC-JPを使用していることが多い
+  return 'euc-jp';
+}
+
+// スクレイパー用の推奨設定
+export const recommendedAxiosConfig = {
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+    'Accept-Charset': 'utf-8, iso-8859-1, euc-jp, shift_jis',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+    'Referer': 'https://www.netkeiba.com/'
+  },
+  responseType: 'arraybuffer',  // バイナリデータとして取得
+  responseEncoding: 'binary'
+};

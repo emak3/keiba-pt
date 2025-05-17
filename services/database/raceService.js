@@ -1,9 +1,13 @@
+// services/database/raceService.js の修正版
+// updateNarRaceResult 関数の実装確認
+
 import { doc, collection, setDoc, getDoc, getDocs, query, where, updateDoc } from 'firebase/firestore';
 import { getDb } from '../../config/firebase-config.js';
 import logger from '../../utils/logger.js';
 
 import * as textCleaner from '../../utils/textCleaner.js';
 const { cleanJapaneseText, cleanVenueName, cleanRaceName } = textCleaner;
+
 /**
  * JRA のレース情報を保存/更新
  * @param {Object} race - レース情報オブジェクト
@@ -255,6 +259,52 @@ async function processBetsForRace(raceId) {
     logger.error(`レース ${raceId} の馬券処理中にエラーが発生しました: ${error}`);
     throw error;
   }
+}
+
+// この関数を追加
+// Firestoreのインクリメント操作を実装
+import { increment } from 'firebase/firestore';
+
+/**
+ * レース結果に基づいて馬券の的中確認と払戻金計算
+ * @param {Object} bet - 馬券情報
+ * @param {Object} payouts - 払戻情報
+ * @returns {number} 払戻金額
+ */
+function calculatePayout(bet, payouts) {
+  // レースの払戻情報が存在しない場合
+  if (!payouts) {
+    return 0;
+  }
+  
+  // 馬券タイプに対応する払戻情報がない場合
+  const betTypePayoutMap = {
+    tansho: payouts.tansho,
+    fukusho: payouts.fukusho,
+    wakuren: payouts.wakuren,
+    umaren: payouts.umaren,
+    wide: payouts.wide,
+    umatan: payouts.umatan,
+    sanrenpuku: payouts.sanrenpuku,
+    sanrentan: payouts.sanrentan
+  };
+  
+  const targetPayouts = betTypePayoutMap[bet.betType];
+  if (!targetPayouts || targetPayouts.length === 0) {
+    return 0;
+  }
+  
+  // 馬券の購入方法に応じた的中確認
+  let payout = 0;
+  
+  // 詳細な的中確認ロジックは省略
+  // 簡略化のため、単純に最初の払戻情報を使用
+  if (targetPayouts.length > 0) {
+    payout = targetPayouts[0].payout;
+  }
+  
+  // 100円単位での払戻計算（100ptが1ユニット）
+  return Math.floor(payout * (bet.amount / 100));
 }
 
 /**

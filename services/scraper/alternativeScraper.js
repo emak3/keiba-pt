@@ -6,19 +6,45 @@ import dayjs from 'dayjs';
 import logger from '../../utils/logger.js';
 import iconv from 'iconv-lite';
 
-// HTTP リクエスト用のヘッダーを設定
-const axiosConfig = {
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache',
-    'Referer': 'https://www.netkeiba.com/'
-  },
-  responseType: 'arraybuffer',  // バイナリデータとして取得
-  responseEncoding: 'binary'
-};
+// textCleaner.js をインポート（修正後のファイル）
+import { detectCharset, validateRaceName, validateVenueName, recommendedAxiosConfig } from '../../utils/textCleaner.js';
+
+// HTTP リクエスト用のヘッダーを更新
+const axiosConfig = recommendedAxiosConfig;
+
+/**
+ * 共通のデータ取得関数
+ * @param {string} url - 取得するURL
+ * @param {string} debugFileName - デバッグ用のファイル名
+ * @returns {Promise<{html: string, $: CheerioStatic}>} HTML文字列とCheerioオブジェクト
+ */
+async function fetchAndParse(url, debugFileName) {
+  logger.info(`データを取得中: ${url}`);
+
+  const response = await axios.get(url, axiosConfig);
+  
+  // 文字コードを動的に検出
+  const charset = detectCharset(response);
+  logger.debug(`検出された文字コード: ${charset}`);
+
+  // レスポンスを検出された文字コードで変換
+  const html = iconv.decode(Buffer.from(response.data), charset);
+
+  // デバッグ用にHTMLを保存
+  const debugDir = path.join(process.cwd(), 'debug');
+  if (!fs.existsSync(debugDir)) {
+    fs.mkdirSync(debugDir);
+  }
+  
+  if (debugFileName) {
+    fs.writeFileSync(path.join(debugDir, debugFileName), html, 'utf-8');
+  }
+
+  // Cheerioでパース
+  const $ = cheerio.load(html);
+  
+  return { html, $ };
+}
 
 /**
  * 今日の日付を「YYYYMMDD」形式で取得
@@ -37,25 +63,9 @@ export async function fetchRaceCalendar(dateString = getTodayDateString()) {
   try {
     // メインページを取得
     const url = 'https://www.netkeiba.com/';
-    logger.info(`ネットケイバのメインページを取得中: ${url}`);
     
-    const response = await axios.get(url, axiosConfig);
-    
-    // ネットケイバはEUC-JPを使用しているため、強制的に指定
-    const charset = 'euc-jp';
-    logger.debug(`レスポンスの文字コードを ${charset} として処理します`);
-    
-    // レスポンスをUTF-8に変換
-    const html = iconv.decode(Buffer.from(response.data), charset);
-    
-    // デバッグ用にHTMLを保存
-    const debugDir = path.join(process.cwd(), 'debug');
-    if (!fs.existsSync(debugDir)) {
-      fs.mkdirSync(debugDir);
-    }
-    fs.writeFileSync(path.join(debugDir, 'netkeiba_main.html'), html, 'utf-8');
-    
-    const $ = cheerio.load(html);
+    // fetchAndParse関数を使用してHTMLを取得とパース
+    const { $ } = await fetchAndParse(url, 'netkeiba_main.html');
     
     // JRAとNARの開催情報を取得
     const jraVenues = [];
@@ -109,25 +119,9 @@ export async function fetchJraRacesAlternative(dateString = getTodayDateString()
   try {
     // JRAのメインページを取得
     const url = 'https://race.netkeiba.com/top/';
-    logger.info(`JRAメインページを取得中: ${url}`);
     
-    const response = await axios.get(url, axiosConfig);
-    
-    // ネットケイバはEUC-JPを使用しているため、強制的に指定
-    const charset = 'euc-jp';
-    logger.debug(`レスポンスの文字コードを ${charset} として処理します`);
-    
-    // レスポンスをUTF-8に変換
-    const html = iconv.decode(Buffer.from(response.data), charset);
-    
-    // デバッグ用にHTMLを保存
-    const debugDir = path.join(process.cwd(), 'debug');
-    if (!fs.existsSync(debugDir)) {
-      fs.mkdirSync(debugDir);
-    }
-    fs.writeFileSync(path.join(debugDir, 'jra_main.html'), html, 'utf-8');
-    
-    const $ = cheerio.load(html);
+    // fetchAndParse関数を使用してHTMLを取得とパース
+    const { $ } = await fetchAndParse(url, 'jra_main.html');
     const races = [];
     
     // レーステーブルを探す
@@ -171,8 +165,6 @@ export async function fetchJraRacesAlternative(dateString = getTodayDateString()
           }
         }
         
-        logger.debug(`レース時間: ${raceTime}`);
-        
         // レース名を取得
         const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
         
@@ -187,28 +179,17 @@ export async function fetchJraRacesAlternative(dateString = getTodayDateString()
         if (raceIdMatch) {
           const raceId = raceIdMatch[1];
           
-          // レース番号と時間を抽出
-          const raceNumberMatch = raceInfo.match(/(\d+)R/);
-          const raceTimeMatch = raceInfo.match(/(\d+:\d+)/);
-          
-          const raceNumber = raceNumberMatch ? raceNumberMatch[1] : '';
-          const raceTime = raceTimeMatch ? raceTimeMatch[1] : '';
-          
-          // レース名の抽出は複雑なため、ページタイトルやその他の情報から推測
-          let raceName = '';
-          if (raceInfo.includes('(')) {
-            raceName = raceInfo.split('(')[0].replace(/\d+R/, '').trim();
-          } else {
-            raceName = raceInfo.replace(/\d+R/, '').replace(/\d+:\d+/, '').trim();
-          }
+          // 検証済みのレース名と開催場所を使用
+          const validatedVenue = validateVenueName(venueName);
+          const validatedRaceName = validateRaceName(raceName, validatedVenue, parseInt(raceNumber, 10));
           
           if (raceId && raceNumber) {
             races.push({
               id: raceId,
               type: 'jra',
-              venue: venueName,
+              venue: validatedVenue,
               number: parseInt(raceNumber, 10),
-              name: raceName || `${venueName} ${raceNumber}R`,
+              name: validatedRaceName,
               time: raceTime,
               date: dateString,
               status: 'upcoming',
@@ -241,25 +222,9 @@ export async function fetchNarRacesAlternative(dateString = getTodayDateString()
   try {
     // NARのメインページを取得
     const url = 'https://nar.netkeiba.com/top/';
-    logger.info(`NARメインページを取得中: ${url}`);
     
-    const response = await axios.get(url, axiosConfig);
-    
-    // ネットケイバはEUC-JPを使用しているため、強制的に指定
-    const charset = 'euc-jp';
-    logger.debug(`レスポンスの文字コードを ${charset} として処理します`);
-    
-    // レスポンスをUTF-8に変換
-    const html = iconv.decode(Buffer.from(response.data), charset);
-    
-    // デバッグ用にHTMLを保存
-    const debugDir = path.join(process.cwd(), 'debug');
-    if (!fs.existsSync(debugDir)) {
-      fs.mkdirSync(debugDir);
-    }
-    fs.writeFileSync(path.join(debugDir, 'nar_main.html'), html, 'utf-8');
-    
-    const $ = cheerio.load(html);
+    // fetchAndParse関数を使用してHTMLを取得とパース
+    const { $ } = await fetchAndParse(url, 'nar_main.html');
     const races = [];
     
     // レーステーブルを探す
@@ -288,7 +253,7 @@ export async function fetchNarRacesAlternative(dateString = getTodayDateString()
           const raceNumber = raceNumberMatch ? raceNumberMatch[1] : '';
           const raceTime = raceTimeMatch ? raceTimeMatch[1] : '';
           
-          // レース名の抽出は複雑なため、ページタイトルやその他の情報から推測
+          // レース名の抽出
           let raceName = '';
           if (raceInfo.includes('(')) {
             raceName = raceInfo.split('(')[0].replace(/\d+R/, '').trim();
@@ -296,13 +261,17 @@ export async function fetchNarRacesAlternative(dateString = getTodayDateString()
             raceName = raceInfo.replace(/\d+R/, '').replace(/\d+:\d+/, '').trim();
           }
           
+          // 検証済みのレース名と開催場所を使用
+          const validatedVenue = validateVenueName(venueName);
+          const validatedRaceName = validateRaceName(raceName, validatedVenue, parseInt(raceNumber, 10));
+          
           if (raceId && raceNumber) {
             races.push({
               id: raceId,
               type: 'nar',
-              venue: venueName,
+              venue: validatedVenue,
               number: parseInt(raceNumber, 10),
-              name: raceName || `${venueName} ${raceNumber}R`,
+              name: validatedRaceName || `${validatedVenue} ${raceNumber}R`,
               time: raceTime,
               date: dateString,
               status: 'upcoming',

@@ -1,10 +1,14 @@
+// index.js の修正版
+// エンコーディング問題対応のための変更部分
+
 import { Client, GatewayIntentBits, Collection, Events, REST, Routes } from 'discord.js';
 import { config } from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { initializeFirebase } from './config/firebase-config.js';
-import { startRaceScheduler } from './services/scheduler/raceScheduler.js';
+// 強化版スケジューラーのインポート
+import { startEnhancedRaceScheduler } from './services/scheduler/enhancedRaceScheduler.js';
 import logger from './utils/logger.js';
 
 // 環境変数の読み込み
@@ -78,8 +82,8 @@ async function registerCommands() {
 client.once(Events.ClientReady, () => {
   logger.info(`${client.user.tag} として準備完了！`);
   
-  // レーススケジューラーの開始
-  startRaceScheduler(client);
+  // 強化版レーススケジューラーの開始 - 文字コード問題対応
+  startEnhancedRaceScheduler(client);
 });
 
 // インタラクション（スラッシュコマンド）の処理
