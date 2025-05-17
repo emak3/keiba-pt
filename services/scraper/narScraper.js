@@ -7,6 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import iconv from 'iconv-lite';
 
+// textCleaner.js をインポート
+import * as textCleaner from '../../utils/textCleaner.js';
+const { cleanJapaneseText } = textCleaner;
+
 /**
  * レスポンスの文字セットを検出
  * @param {Object} response - Axiosレスポンス
@@ -105,7 +109,7 @@ export async function fetchNarRaceList(dateString = getTodayDateString()) {
       $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
         const raceNumber = $(raceElement).find('.Race_Num').text().trim().replace(/\D/g, '');
         const raceTime = $(raceElement).find('.RaceData span').first().text().trim();
-        const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
+        const raceName = cleanJapaneseText($(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim());
 
         logger.debug(`レース情報解析中: 番号=${raceNumber}, 時間=${raceTime}, 名前=${raceName}`);
 

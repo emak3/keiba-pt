@@ -12,6 +12,13 @@ export async function saveJraRace(race) {
     const db = getDb();
     const raceRef = doc(db, 'races', race.id);
     
+    // レース情報をクリーンアップ
+    const cleanedRace = {
+      ...race,
+      venue: cleanVenueName(race.venue),
+      name: cleanRaceName(race.name, race.venue, race.number)
+    };
+    
     // 既存データがあるか確認
     const docSnap = await getDoc(raceRef);
     
@@ -25,14 +32,14 @@ export async function saveJraRace(race) {
       
       // 既存データを更新
       await updateDoc(raceRef, {
-        ...race,
+        ...cleanedRace,
         updatedAt: new Date().toISOString()
       });
       logger.debug(`JRA レース ${race.id} を更新しました。`);
     } else {
       // 新規にデータを保存
       await setDoc(raceRef, {
-        ...race,
+        ...cleanedRace,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
@@ -54,6 +61,13 @@ export async function saveNarRace(race) {
     const db = getDb();
     const raceRef = doc(db, 'races', race.id);
     
+    // レース情報をクリーンアップ
+    const cleanedRace = {
+      ...race,
+      venue: cleanVenueName(race.venue),
+      name: cleanRaceName(race.name, race.venue, race.number)
+    };
+    
     // 既存データがあるか確認
     const docSnap = await getDoc(raceRef);
     
@@ -67,14 +81,14 @@ export async function saveNarRace(race) {
       
       // 既存データを更新
       await updateDoc(raceRef, {
-        ...race,
+        ...cleanedRace,
         updatedAt: new Date().toISOString()
       });
       logger.debug(`NAR レース ${race.id} を更新しました。`);
     } else {
       // 新規にデータを保存
       await setDoc(raceRef, {
-        ...race,
+        ...cleanedRace,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });

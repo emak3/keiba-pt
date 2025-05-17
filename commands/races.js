@@ -4,6 +4,10 @@ import { saveUser } from '../services/database/userService.js';
 import dayjs from 'dayjs';
 import logger from '../utils/logger.js';
 
+// textCleaner.js をインポート
+import * as textCleaner from '../utils/textCleaner.js';
+const { cleanRaceName, cleanVenueName } = textCleaner;
+
 export default {
   data: new SlashCommandBuilder()
     .setName('races')
@@ -53,10 +57,17 @@ export default {
       const venueGroups = {};
       
       races.forEach(race => {
-        if (!venueGroups[race.venue]) {
-          venueGroups[race.venue] = [];
+        // 競馬場名をクリーンアップ
+        const cleanedVenue = cleanVenueName(race.venue);
+        
+        if (!venueGroups[cleanedVenue]) {
+          venueGroups[cleanedVenue] = [];
         }
-        venueGroups[race.venue].push(race);
+        venueGroups[cleanedVenue].push({
+          ...race,
+          venue: cleanedVenue,
+          name: cleanRaceName(race.name, cleanedVenue, race.number)
+        });
       });
       
       // 競馬場ごとにエンベッドを作成

@@ -3,6 +3,10 @@ import { getRaceById } from '../services/database/raceService.js';
 import { saveUser } from '../services/database/userService.js';
 import logger from '../utils/logger.js';
 
+// textCleaner.js をインポート
+import * as textCleaner from '../utils/textCleaner.js';
+const { cleanRaceName, cleanVenueName, cleanJapaneseText } = textCleaner;
+
 export default {
   data: new SlashCommandBuilder()
     .setName('result')
@@ -43,9 +47,13 @@ export default {
         return await interaction.editReply(`レース ${race.id} の結果情報がまだ利用できません。しばらく経ってからもう一度お試しください。`);
       }
       
+      // レースデータを処理し、クリーンアップする
+      const cleanedVenue = cleanVenueName(race.venue);
+      const cleanedName = cleanRaceName(race.name, cleanedVenue, race.number);
+      
       // メインの結果エンベッド
       const resultEmbed = new EmbedBuilder()
-        .setTitle(`🏁 ${race.venue} ${race.number}R ${race.name} - 結果`)
+        .setTitle(`🏁 ${cleanedVenue} ${race.number}R ${cleanedName} - 結果`)
         .setDescription(`レース結果と払戻金の情報です。`)
         .setColor(race.type === 'jra' ? 0x00b0f4 : 0xf47200)
         .setTimestamp();
