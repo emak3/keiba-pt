@@ -768,154 +768,219 @@ function getPayoutInfo($, selector) {
  */
 async function getTodayRaces() {
   try {
-    // 当日のレース一覧ページを取得
+    console.log('地方競馬レース一覧を取得しています...');
+    
+    // 当日の日付
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
-
-    const url = `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=${year}${month}${day}`;
-
-    // エンコーディング対応
-    const response = await axios.get(url, {
-      headers: {
-        'Accept-Charset': 'utf-8',
-        'Accept-Language': 'ja-JP,ja;q=0.9'
-      },
-      responseType: 'arraybuffer'
-    });
-
-    // EUC-JPでデコード
-    const html = iconv.decode(response.data, 'EUC-JP');
-    const $ = cheerio.load(html);
-
-    const races = [];
-
-    // 各会場のレース情報を取得
-    $('.RaceList_Data').each((i, element) => {
+    
+    console.log(`今日の日付: ${year}/${month}/${day}`);
+    
+    // 複数のURLを試す
+    const urls = [
+      `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=${year}${month}${day}`,
+    ];
+    
+    let races = [];
+    
+    for (const url of urls) {
+      console.log(`地方競馬スクレイピングURL: ${url}`);
+      
       try {
-        $(element).find('li').each((j, race) => {
-          try {
-            const raceNumber = $(race).find('.Race_Num').text().trim();
-            const raceLink = $(race).find('a').attr('href');
-            let raceId = '';
-
-            if (raceLink) {
-              const match = raceLink.match(/race_id=([0-9]+)/);
-              if (match && match[1]) {
-                raceId = match[1];
+        const response = await axios.get(url, {
+          headers: {
+            'Accept-Charset': 'utf-8',
+            'Accept-Language': 'ja-JP,ja;q=0.9',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          },
+          responseType: 'arraybuffer',
+          timeout: 10000
+        });
+        
+        const html = iconv.decode(response.data, 'EUC-JP');
+        const $ = cheerio.load(html);
+        
+        console.log('ページタイトル:', $('title').text().trim());
+        
+        // 方法1: すべてのリンクから直接レースIDを抽出
+        const raceLinkPattern = /race\/shutuba\.html\?race_id=(\d+)/;
+        const foundRaces = [];
+        
+        $('a').each((i, link) => {
+          const href = $(link).attr('href');
+          if (!href) return;
+          
+          const match = href.match(raceLinkPattern);
+          if (!match) return;
+          
+          const raceId = match[1];
+          if (!raceId || raceId.length < 12) return; // 無効なIDをスキップ
+          
+          // 地方競馬のレースIDパターンを持つか確認（JRAと区別）
+          if (!raceId.match(/^202\d3[1-9]/)) return;
+          
+          // レース名とレース番号の取得
+          let raceName = $(link).text().trim();
+          
+          // 親要素からレース番号とレース名を取得
+          let raceNumber = '';
+          let raceTime = '00:00';
+          
+          // リンクの親要素から追加情報を取得
+          const parentEl = $(link).parent();
+          if (parentEl.length > 0) {
+            // 親要素内のテキストからレース番号を抽出
+            const parentText = parentEl.text().trim();
+            
+            // レース番号の抽出
+            const raceNumMatch = parentText.match(/(\d+)R/);
+            if (raceNumMatch && raceNumMatch[1]) {
+              raceNumber = raceNumMatch[1];
+            }
+            
+            // 時間の抽出
+            const timeMatch = parentText.match(/(\d+):(\d+)/);
+            if (timeMatch) {
+              raceTime = `${timeMatch[1]}:${timeMatch[2]}`;
+            }
+            
+            // レース名が空なら親要素からも探す
+            if (!raceName) {
+              const nameEl = parentEl.find('.RaceName, .Race_Name');
+              if (nameEl.length > 0) {
+                raceName = nameEl.text().trim();
               }
             }
-
-            if (!raceId) return;
-
-            const raceName = $(race).find('.Race_Name').text().trim();
-            const raceTime = $(race).find('.Race_Time').text().trim();
-
-            // スクレイピングで取得した会場名
-            let trackName = null;
-
-            // 会場名が取得できない場合はレースIDから取得
-            if (!trackName) {
-              trackName = getTrackNameFromRaceId(raceId);
-              console.log(`会場名がスクレイピングできなかったため、レースID ${raceId} から会場名 ${trackName} を設定しました`);
-            }
-
-            races.push({
-              id: raceId,
-              track: trackName,
-              number: raceNumber,
-              name: raceName,
-              time: raceTime,
-              type: 'nar',
-              date: extractDateFromRaceId(raceId),
-              isCompleted: false
-            });
-          } catch (innerError) {
-            console.error('レース情報の解析中にエラーが発生しました:', innerError);
           }
+          
+          // 会場名を取得
+          const trackName = getTrackNameFromRaceId(raceId);
+          
+          // レース情報を保存
+          foundRaces.push({
+            id: raceId,
+            track: trackName,
+            number: raceNumber || getRaceNumberFromRaceId(raceId),
+            name: raceName || `${raceNumber}R`,
+            time: raceTime,
+            type: 'nar',
+            date: `${year}/${month}/${day}`,
+            isCompleted: false
+          });
         });
-      } catch (outerError) {
-        console.error('会場情報の解析中にエラーが発生しました:', outerError);
+        
+        // 重複を除去して追加
+        for (const race of foundRaces) {
+          if (!races.some(r => r.id === race.id)) {
+            races.push(race);
+          }
+        }
+        
+        // レースが見つかったら次のURLは試さない
+        if (races.length > 0) {
+          console.log(`${url} から ${foundRaces.length} 件のレースを取得`);
+          break;
+        }
+      } catch (urlError) {
+        console.log(`${url} からの取得中にエラー:`, urlError.message);
+        // エラーが発生しても次のURLを試す
       }
+    }
+    
+    // 重複を除去して会場・レース番号でソート
+    const uniqueRaces = [];
+    const seenIds = new Set();
+    
+    for (const race of races) {
+      if (!seenIds.has(race.id)) {
+        seenIds.add(race.id);
+        uniqueRaces.push(race);
+      }
+    }
+    
+    // レースを会場とレース番号でソート
+    uniqueRaces.sort((a, b) => {
+      if (a.track !== b.track) {
+        return a.track.localeCompare(b.track);
+      }
+      return parseInt(a.number) - parseInt(b.number);
     });
-    console.log(`地方競馬レース一覧: ${races.length}件取得`);
-    return races;
+    
+    console.log(`地方競馬レース一覧: ${uniqueRaces.length}件取得`);
+    
+    // レースが一つも見つからない場合は、HTMLからレースIDを直接抽出
+    if (uniqueRaces.length === 0) {
+      console.log('レースが見つかりませんでした。HTMLからレースIDを直接抽出します...');
+      
+      for (const url of urls) {
+        try {
+          const response = await axios.get(url, {
+            headers: {
+              'Accept-Charset': 'utf-8',
+              'Accept-Language': 'ja-JP,ja;q=0.9',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            },
+            responseType: 'arraybuffer'
+          });
+          
+          const html = iconv.decode(response.data, 'EUC-JP');
+          
+          // HTMLテキスト全体からレースIDを抽出
+          const raceIdMatches = html.match(/race_id=(\d{12})/g);
+          if (raceIdMatches && raceIdMatches.length > 0) {
+            console.log(`HTML内に ${raceIdMatches.length} 件のレースID候補を発見`);
+            
+            const uniqueIds = [...new Set(raceIdMatches.map(m => m.replace('race_id=', '')))];
+            console.log(`重複除外後: ${uniqueIds.length} 件のユニークなレースID`);
+            
+            for (const id of uniqueIds) {
+              // 地方競馬のレースIDパターンを持つか確認
+              if (!id.match(/^202\d3[1-9]/)) continue;
+              
+              // 今日の日付と合致するか確認
+              const raceDate = extractDateFromRaceId(id);
+              if (!raceDate || !raceDate.includes(`${year}/${month}/${day}`)) continue;
+              
+              const trackName = getTrackNameFromRaceId(id);
+              const raceNumber = getRaceNumberFromRaceId(id);
+              
+              if (!seenIds.has(id)) {
+                seenIds.add(id);
+                uniqueRaces.push({
+                  id: id,
+                  track: trackName,
+                  number: raceNumber,
+                  name: `${raceNumber}R`,
+                  time: '00:00', // 時間は不明
+                  type: 'nar',
+                  date: `${year}/${month}/${day}`,
+                  isCompleted: false
+                });
+              }
+            }
+            
+            if (uniqueRaces.length > 0) {
+              console.log(`HTML構造解析から ${uniqueRaces.length} 件のレースを抽出`);
+              break;
+            }
+          }
+        } catch (error) {
+          console.log(`${url} のHTML解析中にエラー:`, error.message);
+        }
+      }
+    }
+    
+    return uniqueRaces;
   } catch (error) {
     console.error('地方競馬レース一覧の取得中にエラーが発生しました:', error);
     return [];
   }
 }
 
-// テスト用のスクレイピング関数を追加
-async function testScrapeRaceResult(raceId) {
-  try {
-    console.log(`テストスクレイピング開始: ${raceId}`);
-    const url = `https://nar.netkeiba.com/race/result.html?race_id=${raceId}`;
-
-    // エンコーディング対応
-    const response = await axios.get(url, {
-      headers: {
-        'Accept-Charset': 'utf-8',
-        'Accept-Language': 'ja-JP,ja;q=0.9'
-      },
-      responseType: 'arraybuffer'
-    });
-
-    const html = iconv.decode(response.data, 'EUC-JP');
-    const $ = cheerio.load(html);
-
-    // ページの基本情報をログ出力
-    console.log('ページタイトル:', $('title').text());
-    console.log('ページにある主要なセレクタ:');
-    console.log('- ResultTable:', $('.ResultTable').length);
-    console.log('- Result_Pay_Back:', $('.Result_Pay_Back').length);
-    console.log('- ResultPaybackLeftWrap:', $('.ResultPaybackLeftWrap').length);
-    console.log('- HorseList:', $('.HorseList').length);
-    console.log('- Tansho:', $('.Tansho').length);
-    console.log('- Fukusho:', $('.Fukusho').length);
-
-    // 払戻表が存在するかをチェック
-    const payoutTables = $('.Payout_Detail_Table');
-    console.log('- 払戻表の数:', payoutTables.length);
-
-    if (payoutTables.length > 0) {
-      console.log('最初の払戻表のHTML:');
-      console.log(payoutTables.first().html().substring(0, 500) + '...');
-    }
-
-    // 直接単勝情報を取得してみる
-    const tanshoElem = $('.Tansho');
-    if (tanshoElem.length > 0) {
-      console.log('単勝セクションのHTML:');
-      console.log(tanshoElem.html().substring(0, 300) + '...');
-
-      // 単勝の馬番
-      const tanshoNum = tanshoElem.find('.Result div span').first().text().trim();
-      console.log('単勝馬番:', tanshoNum);
-
-      // 単勝の払戻金
-      const tanshoPay = tanshoElem.find('.Payout span').first().text().trim();
-      console.log('単勝払戻:', tanshoPay);
-    }
-
-    return {
-      success: true,
-      message: 'テスト完了',
-      hasResultPage: $('.Result_Pay_Back').length > 0 || $('.ResultPaybackLeftWrap').length > 0 || $('.Tansho').length > 0
-    };
-  } catch (error) {
-    console.error('テストスクレイピング中にエラーが発生しました:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
 module.exports = {
   getTodayRaces,
   getRaceDetails,
-  getRaceResult,
-  testScrapeRaceResult
+  getRaceResult
 };

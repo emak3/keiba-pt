@@ -11,6 +11,7 @@ const { getRaceNumberFromRaceId, getTrackNameFromRaceId } = require('../utils/tr
  * 特定のレースの出馬表を取得する（エンコーディング問題修正）
  */
 async function getRaceDetails(raceId) {
+  // 元の関数の内容をそのまま維持
   try {
     const url = `https://race.netkeiba.com/race/shutuba.html?race_id=${raceId}`;
 
@@ -162,6 +163,7 @@ async function getRaceDetails(raceId) {
  * レース結果と払戻金を取得する
  */
 async function getRaceResult(raceId) {
+  // 元の関数の内容をそのまま維持
   try {
     console.log(`レース結果取得開始: ${raceId}`);
     const url = `https://race.netkeiba.com/race/result.html?race_id=${raceId}`;
@@ -232,7 +234,7 @@ async function getRaceResult(raceId) {
 
     // 払戻金情報を取得
     let payoutSectionExists = false;
-    
+
     // 「払戻金」セクションの存在チェック
     if ($('.Result_Pay_Back').length > 0 || $('.ResultPaybackLeftWrap').length > 0) {
       payoutSectionExists = true;
@@ -275,7 +277,7 @@ async function getRaceResult(raceId) {
         const number = parseInt(tanshoNum.replace(/[^\d]/g, ''), 10);
         const pay = parseInt(tanshoPayout.replace(/[^\d]/g, ''), 10);
         const pop = tanshoPopularity ? parseInt(tanshoPopularity.replace(/[^\d]/g, ''), 10) : 0;
-        
+
         if (!isNaN(number) && !isNaN(pay)) {
           payouts.tansho = [{
             numbers: [number],
@@ -344,7 +346,7 @@ async function getRaceResult(raceId) {
         const number2 = parseInt(umarenNum2.replace(/[^\d]/g, ''), 10);
         const pay = parseInt(umarenPayout.replace(/[^\d]/g, ''), 10);
         const pop = umarenPopularity ? parseInt(umarenPopularity.replace(/[^\d]/g, ''), 10) : 0;
-        
+
         if (!isNaN(number1) && !isNaN(number2) && !isNaN(pay)) {
           payouts.umaren = [{
             numbers: [number1, number2],
@@ -420,7 +422,7 @@ async function getRaceResult(raceId) {
         const number2 = parseInt(umatanNum2.replace(/[^\d]/g, ''), 10);
         const pay = parseInt(umatanPayout.replace(/[^\d]/g, ''), 10);
         const pop = umatanPopularity ? parseInt(umatanPopularity.replace(/[^\d]/g, ''), 10) : 0;
-        
+
         if (!isNaN(number1) && !isNaN(number2) && !isNaN(pay)) {
           payouts.umatan = [{
             numbers: [number1, number2],
@@ -445,7 +447,7 @@ async function getRaceResult(raceId) {
         const number3 = parseInt(sanrenpukuNum3.replace(/[^\d]/g, ''), 10);
         const pay = parseInt(sanrenpukuPayout.replace(/[^\d]/g, ''), 10);
         const pop = sanrenpukuPopularity ? parseInt(sanrenpukuPopularity.replace(/[^\d]/g, ''), 10) : 0;
-        
+
         if (!isNaN(number1) && !isNaN(number2) && !isNaN(number3) && !isNaN(pay)) {
           payouts.sanrenpuku = [{
             numbers: [number1, number2, number3],
@@ -470,7 +472,7 @@ async function getRaceResult(raceId) {
         const number3 = parseInt(sanrentanNum3.replace(/[^\d]/g, ''), 10);
         const pay = parseInt(sanrentanPayout.replace(/[^\d]/g, ''), 10);
         const pop = sanrentanPopularity ? parseInt(sanrentanPopularity.replace(/[^\d]/g, ''), 10) : 0;
-        
+
         if (!isNaN(number1) && !isNaN(number2) && !isNaN(number3) && !isNaN(pay)) {
           payouts.sanrentan = [{
             numbers: [number1, number2, number3],
@@ -493,7 +495,7 @@ async function getRaceResult(raceId) {
         const number2 = parseInt(wakurenNum2.replace(/[^\d]/g, ''), 10);
         const pay = parseInt(wakurenPayout.replace(/[^\d]/g, ''), 10);
         const pop = wakurenPopularity ? parseInt(wakurenPopularity.replace(/[^\d]/g, ''), 10) : 0;
-        
+
         if (!isNaN(number1) && !isNaN(number2) && !isNaN(pay)) {
           payouts.wakuren = [{
             numbers: [number1, number2],
@@ -508,7 +510,7 @@ async function getRaceResult(raceId) {
       // 直接TextContentを取得して数値抽出する最後の手段
       if (!hasPayoutData) {
         console.log('セレクタベースの抽出に失敗しました。テキストコンテンツから直接抽出を試みます');
-        
+
         // 単勝
         const tanshoText = $('.Tansho').text();
         const tanshoMatch = tanshoText.match(/(\d+)[\s\S]*?(\d+)円[\s\S]*?(\d+)人気/);
@@ -521,15 +523,15 @@ async function getRaceResult(raceId) {
           console.log('テキストから抽出した単勝情報:', payouts.tansho);
           hasPayoutData = true;
         }
-        
+
         // 馬連
         const umarenText = $('.Umaren').text();
         const umarenMatch = umarenText.match(/(\d+)[\s\S]*?(\d+)[\s\S]*?(\d+),?(\d*)円[\s\S]*?(\d+)人気/);
         if (umarenMatch) {
-          const payout = umarenMatch[4] ? 
-            parseInt(umarenMatch[3] + umarenMatch[4], 10) : 
+          const payout = umarenMatch[4] ?
+            parseInt(umarenMatch[3] + umarenMatch[4], 10) :
             parseInt(umarenMatch[3], 10);
-          
+
           payouts.umaren = [{
             numbers: [parseInt(umarenMatch[1], 10), parseInt(umarenMatch[2], 10)],
             payout: payout,
@@ -538,7 +540,7 @@ async function getRaceResult(raceId) {
           console.log('テキストから抽出した馬連情報:', payouts.umaren);
           hasPayoutData = true;
         }
-        
+
         // 他の馬券タイプも同様に処理...
       }
     }
@@ -546,10 +548,10 @@ async function getRaceResult(raceId) {
     // レース完了フラグの判定
     // 着順情報があり、かつ払戻情報があるか、払戻セクションが存在する場合に完了とみなす
     const isCompleted = results.length > 0 && (hasPayoutData || payoutSectionExists);
-    
+
     // デバッグ出力
     console.log('抽出した払戻金情報:', JSON.stringify(payouts, null, 2));
-    
+
     const resultData = {
       id: raceId,
       results,
@@ -603,7 +605,7 @@ function getPayoutInfo($, selector) {
       }
     });
     console.log('抽出した馬番:', numbers);
-    
+
     // 払戻金の取得
     const payouts = [];
     $(selector.pay).each((i, element) => {
@@ -611,7 +613,7 @@ function getPayoutInfo($, selector) {
         // 直接テキストを抽出して数値のみを取得
         const payText = $(element).text().trim();
         console.log(`払戻金テキスト [${i}]: "${payText}"`);
-        
+
         // 数字のみを抽出
         const pay = parseInt(payText.replace(/[^\d]/g, ''), 10);
         if (!isNaN(pay)) {
@@ -622,7 +624,7 @@ function getPayoutInfo($, selector) {
       }
     });
     console.log('抽出した払戻金:', payouts);
-    
+
     // 人気順の取得
     const popularities = [];
     $(selector.popularity).each((i, element) => {
@@ -630,7 +632,7 @@ function getPayoutInfo($, selector) {
         // 直接テキストを抽出して数値のみを取得
         const popText = $(element).text().trim();
         console.log(`人気順テキスト [${i}]: "${popText}"`);
-        
+
         // 数字のみを抽出
         const popMatch = popText.match(/(\d+)人気/);
         if (popMatch && popMatch[1]) {
@@ -664,8 +666,8 @@ function getPayoutInfo($, selector) {
           popularity: i < popularities.length ? popularities[i] : 0
         });
       }
-    } else if (selector.number === '.Umatan .Result ul li span' || 
-               selector.number === '.Tan3 .Result ul li span') {
+    } else if (selector.number === '.Umatan .Result ul li span' ||
+      selector.number === '.Tan3 .Result ul li span') {
       // 馬単・3連単は順序あり
       const count = selector.number === '.Tan3 .Result ul li span' ? 3 : 2;
       if (numbers.length >= count && payouts.length > 0) {
@@ -678,11 +680,11 @@ function getPayoutInfo($, selector) {
     } else {
       // その他の馬券タイプ（馬連・ワイド・3連複など）
       const count = selector.number === '.Fuku3 .Result ul li span' ? 3 : 2;
-      
+
       // ulタグごとにグループ化
       const groupedNumbers = [];
       let currentGroup = [];
-      
+
       for (let i = 0; i < numbers.length; i++) {
         currentGroup.push(numbers[i]);
         if (currentGroup.length === count) {
@@ -690,7 +692,7 @@ function getPayoutInfo($, selector) {
           currentGroup = [];
         }
       }
-      
+
       // 各グループごとに払戻情報を追加
       for (let i = 0; i < Math.min(groupedNumbers.length, payouts.length); i++) {
         result.push({
@@ -715,140 +717,233 @@ function getPayoutInfo($, selector) {
  */
 async function getTodayRaces() {
   try {
-    // 当日のレース一覧ページを取得
+    console.log('JRAレース一覧を取得しています...');
+    
+    // 当日の日付
     const date = new Date();
     const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-
-    const url = `https://race.netkeiba.com/top/race_list.html?kaisai_date=${year}${month.toString().padStart(2, '0')}${day.toString().padStart(2, '0')}`;
-
-    // エンコーディング対応
-    const response = await axios.get(url, {
-      headers: {
-        'Accept-Charset': 'utf-8',
-        'Accept-Language': 'ja-JP,ja;q=0.9'
-      },
-      responseType: 'arraybuffer'
-    });
-
-    // EUC-JPでデコード
-    const html = iconv.decode(response.data, 'EUC-JP');
-    const $ = cheerio.load(html);
-
-    const races = [];
-
-    // 各会場のレース情報を取得
-    $('.RaceList_DataItem').each((i, element) => {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    
+    console.log(`今日の日付: ${year}/${month}/${day}`);
+    
+    // URLバリエーション
+    const urls = [
+      `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=${year}${month}${day}`
+    ];
+    
+    let races = [];
+    
+    for (const url of urls) {
+      console.log(`JRAスクレイピングURL: ${url}`);
+      
       try {
-        const track = $(element).find('.RaceList_DataTitle').text().trim();
-
-        $(element).find('li').each((j, race) => {
-          try {
-            const raceNumber = $(race).find('.Race_Num').text().trim();
-            const raceLink = $(race).find('a').attr('href');
-            let raceId = '';
-
-            if (raceLink) {
-              const match = raceLink.match(/race_id=([0-9]+)/);
-              if (match && match[1]) {
-                raceId = match[1];
+        const response = await axios.get(url, {
+          headers: {
+            'Accept-Charset': 'utf-8',
+            'Accept-Language': 'ja-JP,ja;q=0.9',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          },
+          responseType: 'arraybuffer',
+          timeout: 10000
+        });
+        
+        const html = iconv.decode(response.data, 'EUC-JP');
+        const $ = cheerio.load(html);
+        
+        console.log('ページタイトル:', $('title').text().trim());
+        
+        // 方法1: すべてのリンクから直接レースIDを抽出
+        const foundRaces = [];
+        
+        // レースへのリンクを探す (shutuba.html, denma.html, race.html などを含むリンク)
+        $('a').each((i, link) => {
+          const href = $(link).attr('href');
+          if (!href) return;
+          
+          // 複数のパターンを試す
+          const raceIdPatterns = [
+            /race\/shutuba\.html\?race_id=(\d{12})/,
+            /race\/denma\.html\?race_id=(\d{12})/,
+            /race\/race\.html\?race_id=(\d{12})/
+          ];
+          
+          let raceId = null;
+          for (const pattern of raceIdPatterns) {
+            const match = href.match(pattern);
+            if (match && match[1]) {
+              raceId = match[1];
+              break;
+            }
+          }
+          
+          if (!raceId || raceId.length !== 12) return;
+          
+          // JRAのレースIDパターンを持つか確認
+          // 5-6桁目が01-10の場合はJRA
+          const venueCode = raceId.substring(4, 6);
+          const isJRA = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10'].includes(venueCode);
+          
+          if (!isJRA) return;
+          
+          // レース番号を抽出（末尾2桁）
+          const raceNumber = raceId.slice(-2).replace(/^0/, '');
+          
+          // レース名と時間の取得
+          let raceName = '';
+          let raceTime = '00:00';
+          
+          // リンクのテキストを確認
+          const linkText = $(link).text().trim();
+          if (linkText) {
+            // リンクテキストがレース名の場合もある
+            raceName = linkText;
+          }
+          
+          // 親要素から情報を抽出
+          let parentEl = $(link).parent();
+          for (let i = 0; i < 3; i++) { // 最大3階層まで遡る
+            const parentText = parentEl.text().trim();
+            
+            // レース番号の表記を探す
+            if (!raceName && parentText.includes('R')) {
+              const raceNameMatch = parentText.match(/(\d+)R\s*(.*?)(?:\s|$)/);
+              if (raceNameMatch) {
+                raceName = raceNameMatch[2] || `${raceNameMatch[1]}R`;
               }
             }
-
-            if (!raceId) return;
-
-            const raceName = $(race).find('.Race_Name').text().trim();
-            const raceTime = $(race).find('.Race_Time').text().trim();
-
-            // スクレイピングで取得した会場名
-            let trackName = null;
-
-            // 会場名が取得できない場合はレースIDから取得
-            if (!trackName) {
-              trackName = getTrackNameFromRaceId(raceId);
-              console.log(`会場名がスクレイピングできなかったため、レースID ${raceId} から会場名 ${trackName} を設定しました`);
+            
+            // 時間表記を探す
+            const timeMatch = parentText.match(/(\d+):(\d+)/);
+            if (timeMatch) {
+              raceTime = `${timeMatch[1]}:${timeMatch[2]}`;
             }
-
-            races.push({
-              id: raceId,
-              track: trackName,
-              number: raceNumber,
-              name: raceName,
-              time: raceTime,
-              type: 'jra',
-              date: extractDateFromRaceId(raceId),
-              isCompleted: false
-            });
-          } catch (innerError) {
-            console.error('レース情報の解析中にエラーが発生しました:', innerError);
+            
+            parentEl = parentEl.parent(); // 一階層上に移動
           }
+          
+          // 会場名を取得
+          const trackName = getTrackNameFromRaceId(raceId);
+          
+          // レース情報を保存
+          foundRaces.push({
+            id: raceId,
+            track: trackName,
+            number: raceNumber,
+            name: raceName || `${raceNumber}R`,
+            time: raceTime,
+            type: 'jra',
+            date: `${year}/${month}/${day}`,
+            isCompleted: false
+          });
         });
-      } catch (outerError) {
-        console.error('会場情報の解析中にエラーが発生しました:', outerError);
+        
+        // 重複を除去して追加
+        for (const race of foundRaces) {
+          if (!races.some(r => r.id === race.id)) {
+            races.push(race);
+          }
+        }
+        
+        if (foundRaces.length > 0) {
+          console.log(`${url} から ${foundRaces.length} 件のレースを取得`);
+          break;
+        }
+      } catch (urlError) {
+        console.log(`${url} からの取得中にエラー:`, urlError.message);
       }
+    }
+    
+    // レースが一つも見つからない場合は、HTMLからレースIDを直接抽出
+    if (races.length === 0) {
+      console.log('レースが見つかりませんでした。HTMLからレースIDを直接抽出します...');
+      
+      for (const url of urls) {
+        try {
+          const response = await axios.get(url, {
+            headers: {
+              'Accept-Charset': 'utf-8',
+              'Accept-Language': 'ja-JP,ja;q=0.9',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            },
+            responseType: 'arraybuffer'
+          });
+          
+          const html = iconv.decode(response.data, 'EUC-JP');
+          
+          // HTMLテキスト全体からレースIDを抽出
+          const raceIdMatches = html.match(/race_id=(\d{12})/g);
+          if (raceIdMatches && raceIdMatches.length > 0) {
+            console.log(`HTML内に ${raceIdMatches.length} 件のレースID候補を発見`);
+            
+            const uniqueIds = [...new Set(raceIdMatches.map(m => m.replace('race_id=', '')))];
+            const seenIds = new Set();
+            
+            for (const id of uniqueIds) {
+              // JRAのレースIDパターンを持つか確認
+              const venueCode = id.substring(4, 6);
+              const isJRA = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10'].includes(venueCode);
+              
+              if (!isJRA) continue;
+              
+              // レース番号を抽出（末尾2桁）
+              const raceNumber = id.slice(-2).replace(/^0/, '');
+              
+              if (!seenIds.has(id)) {
+                seenIds.add(id);
+                races.push({
+                  id: id,
+                  track: getTrackNameFromRaceId(id),
+                  number: raceNumber,
+                  name: `${raceNumber}R`,
+                  time: '00:00',
+                  type: 'jra',
+                  date: `${year}/${month}/${day}`,
+                  isCompleted: false
+                });
+              }
+            }
+            
+            if (races.length > 0) {
+              console.log(`HTML構造解析から ${races.length} 件のレースを抽出`);
+              break;
+            }
+          }
+        } catch (error) {
+          console.log(`${url} のHTML解析中にエラー:`, error.message);
+        }
+      }
+    }
+    
+    // 重複を除去して会場・レース番号でソート
+    const uniqueRaces = [];
+    const seenIds = new Set();
+    
+    for (const race of races) {
+      if (!seenIds.has(race.id)) {
+        seenIds.add(race.id);
+        uniqueRaces.push(race);
+      }
+    }
+    
+    // レースを会場とレース番号でソート
+    uniqueRaces.sort((a, b) => {
+      if (a.track !== b.track) {
+        return a.track.localeCompare(b.track);
+      }
+      return parseInt(a.number) - parseInt(b.number);
     });
-
-    console.log(`JRAレース一覧: ${races.length}件取得`);
-    return races;
+    
+    console.log(`JRAレース一覧: ${uniqueRaces.length}件取得`);
+    return uniqueRaces;
   } catch (error) {
     console.error('JRAレース一覧の取得中にエラーが発生しました:', error);
     return [];
   }
 }
 
-// テスト用のスクレイピング関数を追加
-async function testScrapeRaceResult(raceId) {
-  try {
-    console.log(`テストスクレイピング開始: ${raceId}`);
-    const url = `https://race.netkeiba.com/race/result.html?race_id=${raceId}`;
-
-    // エンコーディング対応
-    const response = await axios.get(url, {
-      headers: {
-        'Accept-Charset': 'utf-8',
-        'Accept-Language': 'ja-JP,ja;q=0.9'
-      },
-      responseType: 'arraybuffer'
-    });
-
-    const html = iconv.decode(response.data, 'EUC-JP');
-    const $ = cheerio.load(html);
-
-    // 一部のHTMLコードをデバッグ表示
-    console.log('ページタイトル:', $('title').text());
-    
-    // 単勝セレクタの出力
-    console.log('単勝セレクタ確認:');
-    console.log('単勝の数:', $(selectors.tansho.number).length);
-    console.log('単勝の情報:');
-    $(selectors.tansho.number).each((i, elem) => {
-      console.log(`[${i}] テキスト: "${$(elem).text().trim()}"`);
-    });
-    
-    // 払戻金をテスト
-    console.log('払戻金テスト:');
-    $(selectors.tansho.pay).each((i, elem) => {
-      console.log(`[${i}] HTML: "${$(elem).html()}"`);
-      console.log(`[${i}] テキスト: "${$(elem).text().trim()}"`);
-    });
-    
-    return {
-      success: true,
-      message: 'テスト完了'
-    };
-  } catch (error) {
-    console.error('テストスクレイピング中にエラーが発生しました:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
 module.exports = {
   getTodayRaces,
   getRaceDetails,
-  getRaceResult,
-  testScrapeRaceResult
+  getRaceResult
 };

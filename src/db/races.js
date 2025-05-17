@@ -200,40 +200,36 @@ async function saveResultData(raceId, resultData) {
     
     const db = getDb();
     
-    // データの整合性チェック
-    if (!resultData.payouts) {
-      console.error('払戻情報が含まれていません');
-      return false;
-    }
-    
-    // 有効な払戻情報があるか確認
+    // 払戻情報があるかチェック
     let hasValidPayouts = false;
-    for (const type in resultData.payouts) {
-      if (resultData.payouts[type] && resultData.payouts[type].length > 0) {
-        hasValidPayouts = true;
-        break;
+    if (resultData.payouts) {
+      for (const type in resultData.payouts) {
+        if (resultData.payouts[type] && resultData.payouts[type].length > 0) {
+          hasValidPayouts = true;
+          break;
+        }
       }
     }
     
-    if (!hasValidPayouts) {
-      console.warn('有効な払戻情報が見つかりません。スクレイピングが正しく機能していない可能性があります。');
-      // それでも保存を続行
+    // 払戻情報があれば、明示的にisCompletedをtrueに設定
+    if (hasValidPayouts) {
+      resultData.isCompleted = true;
+      console.log('払戻情報が存在するため、isCompletedをtrueに設定します');
     }
     
-    // まずはraceResultsにデータを保存
+    // raceResultsコレクションに保存
     await db.collection('raceResults').doc(raceId).set(resultData, { merge: true });
     console.log(`レース結果(${raceId})をデータベースに保存しました`);
     
-    // レースの状態を明示的に完了に更新
+    // レースの状態を完了に更新
     await updateRaceStatus({
       id: raceId,
       isCompleted: true
     });
     console.log(`レース(${raceId})の状態を完了に更新しました`);
-    
-    // 馬券の払い戻し処理を別途実行
-    const payoutResult = await processBetPayouts(raceId);
-    console.log(`払戻処理結果: ${payoutResult ? '成功' : '失敗'}`);
+
+    // 馬券の払い戻し処理を実行
+    await processBetPayouts(raceId);
     
     return true;
   } catch (error) {

@@ -19,19 +19,20 @@ function extractDateFromRaceId(raceId) {
   if (!raceId || raceId.length < 12) return null;
   
   try {
-    // 例: 202545051602
-    const year = raceId.substring(0, 4);  // 2025
+    // 現在の日付を取得（今日のレースという前提）
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
     
-    // 月日の部分（5-8文字目が月日）
-    const monthDayPart = raceId.substring(6, 10);  // 0516
-    const month = monthDayPart.substring(0, 2);    // 05
-    const day = monthDayPart.substring(2, 4);      // 16
+    // JRAと地方競馬でIDの構造が異なる
+    // JRAは raceId.charAt(4) === '0' で判定可能
     
-    console.log(`レースID ${raceId} から抽出した日付: ${year}/${month}/${day}`);
-    
+    // 開催情報はあるが日付情報は直接含まれていないため、
+    // 当日のレースという前提で現在の日付を返す
     return `${year}/${month}/${day}`;
   } catch (error) {
-    console.error(`レースID(${raceId})から日付の抽出に失敗しました:`, error);
+    console.error(`レースID(${raceId})から日付の処理に失敗しました:`, error);
     return null;
   }
 }
