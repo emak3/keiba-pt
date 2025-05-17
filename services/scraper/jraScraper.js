@@ -9,7 +9,7 @@ import iconv from 'iconv-lite';
 
 // textCleaner.js をインポート
 import * as textCleaner from '../../utils/textCleaner.js';
-const { cleanJapaneseText } = textCleaner;
+const { cleanJapaneseText, cleanVenueName, cleanRaceName } = textCleaner;
 
 /**
  * レスポンスの文字セットを検出
@@ -185,8 +185,14 @@ export async function fetchJraRaceList(dateString = getTodayDateString()) {
 export async function fetchJraRaceEntries(raceId) {
   try {
     const url = `https://race.netkeiba.com/race/shutuba.html?race_id=${raceId}`;
-    const response = await axios.get(url);
-    const $ = cheerio.load(response.data);
+    const response = await axios.get(url, axiosConfig);
+    
+    // 文字コードをEUC-JPに指定
+    const charset = 'euc-jp';
+    // レスポンスをUTF-8に変換
+    const html = iconv.decode(Buffer.from(response.data), charset);
+    
+    const $ = cheerio.load(html);
 
     // レース基本情報
     const raceName = $('.RaceName').text().trim();
@@ -208,9 +214,9 @@ export async function fetchJraRaceEntries(raceId) {
       horses.push({
         frameNumber: parseInt(frameNumber, 10) || 0,
         horseNumber: parseInt(horseNumber, 10) || 0,
-        horseName,
-        jockey,
-        trainer,
+        horseName: cleanJapaneseText(horseName),
+        jockey: cleanJapaneseText(jockey || '不明'),
+        trainer: cleanJapaneseText(trainer || '不明'),
         weight,
         odds: parseFloat(odds) || 0,
         popularity: parseInt(popularity, 10) || 0
@@ -219,9 +225,9 @@ export async function fetchJraRaceEntries(raceId) {
 
     const raceInfo = {
       id: raceId,
-      name: raceName,
-      courseInfo,
-      raceDetails,
+      name: cleanJapaneseText(raceName),
+      courseInfo: cleanJapaneseText(courseInfo),
+      raceDetails: cleanJapaneseText(raceDetails),
       horses
     };
 
@@ -403,23 +409,110 @@ function extractPayoutData($, selector, targetArray, numbersFinder) {
   try {
     $(`.Payout_Detail_Table ${selector}`).each((index, element) => {
       try {
-        // 馬番または枠番を抽出
-        const numbers = numbersFinder($, element);
-
-        // 払戻金額を抽出
-        const payoutText = $(element).find('.Payout span').text().trim();
-        const payout = parseInt(payoutText.replace(/[^\d]/g, ''), 10) || 0;
-
-        // 人気を抽出
-        const popularityText = $(element).find('.Ninki span').text().trim();
-        const popularity = parseInt(popularityText.replace(/[^\d]/g, ''), 10) || 0;
-
-        if (numbers.length > 0 && payout > 0) {
-          targetArray.push({
-            numbers,
-            payout,
-            popularity
+        // 複勝やワイドのように複数の組合せがある場合は特別処理
+        if (selector === '.Fukusho' || selector === '.Wide') {
+          const allGroups = []; // 全ての馬番グループ
+          const allPayouts = []; // 全ての払戻金
+          const allPopularities = []; // 全ての人気順
+          
+          // 馬番グループの抽出方法
+          if (selector === '.Fukusho') {
+            // 複勝は個別のdiv要素ごとに馬番が格納されている
+            $(element).find('.Result div').each((i, div) => {
+              const horses = [];
+              $(div).find('span').each((j, span) => {
+                const num = $(span).text().trim();
+                if (num && /^\d+$/.test(num)) {
+                  horses.push(parseInt(num, 10));
+                }
+              });
+              if (horses.length > 0) {
+                allGroups.push(horses);
+              }
+            });
+            
+            // グループが見つからない場合は全てのspanから抽出
+            if (allGroups.length === 0) {
+              $(element).find('.Result span').each((i, span) => {
+                const num = $(span).text().trim();
+                if (num && /^\d+$/.test(num)) {
+                  allGroups.push([parseInt(num, 10)]);
+                }
+              });
+            }
+          } else if (selector === '.Wide') {
+            // ワイドは各ul要素が別々の組合せを表す
+            $(element).find('.Result ul').each((i, ul) => {
+              const horses = [];
+              $(ul).find('li span').each((j, span) => {
+                const num = $(span).text().trim();
+                if (num && /^\d+$/.test(num)) {
+                  horses.push(parseInt(num, 10));
+                }
+              });
+              if (horses.length > 0) {
+                allGroups.push(horses);
+              }
+            });
+            
+            // グループが見つからない場合は2つずつペアで処理
+            if (allGroups.length === 0) {
+              const allHorses = [];
+              $(element).find('.Result span').each((i, span) => {
+                const num = $(span).text().trim();
+                if (num && /^\d+$/.test(num)) {
+                  allHorses.push(parseInt(num, 10));
+                }
+              });
+              
+              for (let i = 0; i < allHorses.length; i += 2) {
+                if (i + 1 < allHorses.length) {
+                  allGroups.push([allHorses[i], allHorses[i + 1]]);
+                }
+              }
+            }
+          }
+          
+          // 払戻金と人気順を抽出（改行や区切り文字で分割）
+          const payoutText = $(element).find('.Payout span').text().trim();
+          const popularityText = $(element).find('.Ninki span').text().trim();
+          
+          // 円で区切る（複数の払戻がある場合）
+          payoutText.split(/円|\n/).forEach(p => {
+            const cleaned = p.trim().replace(/[^\d]/g, '');
+            if (cleaned) allPayouts.push(parseInt(cleaned, 10));
           });
+          
+          // 人気で区切る（複数の人気順がある場合）
+          popularityText.split(/人気|\n/).forEach(p => {
+            const cleaned = p.trim().replace(/[^\d]/g, '');
+            if (cleaned) allPopularities.push(parseInt(cleaned, 10));
+          });
+          
+          // 各組合せごとにオブジェクトを作成
+          for (let i = 0; i < allGroups.length && i < allPayouts.length; i++) {
+            const popIndex = i < allPopularities.length ? i : 0;
+            targetArray.push({
+              numbers: allGroups[i],
+              payout: allPayouts[i],
+              popularity: allPopularities[popIndex] || 0
+            });
+          }
+        } else {
+          // その他の馬券タイプは従来通り処理
+          const numbers = numbersFinder($, element);
+          const payoutText = $(element).find('.Payout span').text().trim();
+          const payout = parseInt(payoutText.replace(/[^\d]/g, ''), 10) || 0;
+          const popularityText = $(element).find('.Ninki span').text().trim();
+          const popularity = parseInt(popularityText.replace(/[^\d]/g, ''), 10) || 0;
+
+          if (numbers.length > 0 && payout > 0) {
+            targetArray.push({
+              numbers,
+              payout,
+              popularity
+            });
+          }
         }
       } catch (err) {
         logger.error(`払戻情報の処理でエラー (${selector}): ${err}`);
@@ -448,12 +541,14 @@ function findHorseNumbersInResult($, element) {
   });
 
   // 馬連・三連系タイプ（li span内）
-  $(element).find('.Result ul li span').each((i, el) => {
-    const num = $(el).text().trim();
-    if (num && /^\d+$/.test(num)) {
-      numbers.push(parseInt(num, 10));
-    }
-  });
+  if (numbers.length === 0) {
+    $(element).find('.Result ul li span').each((i, el) => {
+      const num = $(el).text().trim();
+      if (num && /^\d+$/.test(num)) {
+        numbers.push(parseInt(num, 10));
+      }
+    });
+  }
 
   return numbers;
 }

@@ -2,6 +2,8 @@ import { doc, collection, setDoc, getDoc, getDocs, query, where, updateDoc } fro
 import { getDb } from '../../config/firebase-config.js';
 import logger from '../../utils/logger.js';
 
+import * as textCleaner from '../../utils/textCleaner.js';
+const { cleanJapaneseText, cleanVenueName, cleanRaceName } = textCleaner;
 /**
  * JRA のレース情報を保存/更新
  * @param {Object} race - レース情報オブジェクト

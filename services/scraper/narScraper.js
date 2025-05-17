@@ -9,7 +9,7 @@ import iconv from 'iconv-lite';
 
 // textCleaner.js をインポート
 import * as textCleaner from '../../utils/textCleaner.js';
-const { cleanJapaneseText } = textCleaner;
+const { cleanJapaneseText, cleanVenueName, cleanRaceName } = textCleaner;
 
 /**
  * レスポンスの文字セットを検出
@@ -108,7 +108,23 @@ export async function fetchNarRaceList(dateString = getTodayDateString()) {
 
       $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
         const raceNumber = $(raceElement).find('.Race_Num').text().trim().replace(/\D/g, '');
-        const raceTime = $(raceElement).find('.RaceData span').first().text().trim();
+        let raceTime = '';
+        
+        // レース時間を取得 - 複数の候補を試す
+        if ($(raceElement).find('.RaceData span').length > 0) {
+          raceTime = $(raceElement).find('.RaceData span').first().text().trim();
+        } else if ($(raceElement).find('.RaceData').length > 0) {
+          // RaceDataがあるが中にspanがない場合
+          const raceDataText = $(raceElement).find('.RaceData').text().trim();
+          const timeMatch = raceDataText.match(/(\d{1,2}:\d{2})/);
+          if (timeMatch) {
+            raceTime = timeMatch[1];
+          }
+        } else if ($(raceElement).find('.RaceList_Itemtime').length > 0) {
+          // 古い構造の場合
+          raceTime = $(raceElement).find('.RaceList_Itemtime').text().trim();
+        }
+        
         const raceName = cleanJapaneseText($(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim());
 
         logger.debug(`レース情報解析中: 番号=${raceNumber}, 時間=${raceTime}, 名前=${raceName}`);
@@ -164,44 +180,122 @@ export async function fetchNarRaceList(dateString = getTodayDateString()) {
 export async function fetchNarRaceEntries(raceId) {
   try {
     const url = `https://nar.netkeiba.com/race/shutuba.html?race_id=${raceId}`;
-    const response = await axios.get(url);
-    const $ = cheerio.load(response.data);
+    const response = await axios.get(url, axiosConfig);
+    
+    // 文字コードを検出
+    const charset = 'euc-jp';
+    const html = iconv.decode(Buffer.from(response.data), charset);
+    
+    const $ = cheerio.load(html);
 
     // レース基本情報
     const raceName = $('.RaceName').text().trim();
-    const raceTime = $('.RaceData01').text().match(/([0-9]{2}:[0-9]{2})/) ?
-      $('.RaceData01').text().match(/([0-9]{2}:[0-9]{2})/)[1] : '';
+    let raceTime = '';
+    
+    // 時間抽出を複数パターン試行
+    const timeMatches = $('.RaceData01').text().match(/([0-9]{1,2}:[0-9]{2})/);
+    if (timeMatches && timeMatches.length > 1) {
+      raceTime = timeMatches[1];
+    }
+    
     const raceDetails = $('.RaceData02').text().trim();
 
     // 出走馬情報
     const horses = [];
-    $('.HorseList').each((index, element) => {
-      const frameNumber = $(element).find('.Waku1, .Waku2, .Waku3, .Waku4, .Waku5, .Waku6, .Waku7, .Waku8').text().trim();
-      const horseNumber = $(element).find('.Umaban1, .Umaban2, .Umaban3, .Umaban4, .Umaban5, .Umaban6, .Umaban7, .Umaban8').text().trim();
-      const horseName = $(element).find('.HorseName a').text().trim();
-      const jockey = $(element).find('.Jockey a').text().trim();
-      const trainer = $(element).find('.Trainer a').text().trim();
-      const weight = $(element).find('.Weight').text().trim();
-      const odds = $(element).find('.Popular.Txt_R').text().trim();
-      const popularity = $(element).find('.Popular.Txt_C span').text().trim();
+    
+    // 複数のセレクタパターンを試行
+    const horseRowSelectors = [
+      '.HorseList',
+      '.Shutuba_Table tr:not(:first-child)',
+      '.RaceTableArea tr:not(:first-child)'
+    ];
+    
+    let horseRows = [];
+    
+    // いずれかのセレクタで馬情報を取得
+    for (const selector of horseRowSelectors) {
+      const rows = $(selector);
+      if (rows.length > 0) {
+        horseRows = rows;
+        break;
+      }
+    }
+    
+    horseRows.each((index, element) => {
+      // 枠番と馬番の複数セレクタを試行
+      const frameSelectors = ['.Waku', '.Waku1', '.Waku2', '.Waku3', '.Waku4', '.Waku5', '.Waku6', '.Waku7', '.Waku8', 'td:nth-child(1)'];
+      const horseNumSelectors = ['.Umaban', '.Umaban1', '.Umaban2', '.Umaban3', '.Umaban4', '.Umaban5', '.Umaban6', '.Umaban7', '.Umaban8', 'td:nth-child(2)'];
+      
+      let frameNumber = '';
+      let horseNumber = '';
+      
+      // 枠番の抽出
+      for (const selector of frameSelectors) {
+        const cell = $(element).find(selector);
+        if (cell.length > 0) {
+          frameNumber = cell.text().trim().replace(/\D/g, '');
+          if (frameNumber) break;
+        }
+      }
+      
+      // 馬番の抽出
+      for (const selector of horseNumSelectors) {
+        const cell = $(element).find(selector);
+        if (cell.length > 0) {
+          horseNumber = cell.text().trim().replace(/\D/g, '');
+          if (horseNumber) break;
+        }
+      }
+      
+      // 馬名、騎手、調教師の抽出
+      const horseName = $(element).find('.HorseName a, td:nth-child(4) a').first().text().trim();
+      const jockey = $(element).find('.Jockey a, td:nth-child(7) a').first().text().trim();
+      const trainer = $(element).find('.Trainer a, td:nth-child(9) a').first().text().trim();
+      const weight = $(element).find('.Weight, td:nth-child(12)').first().text().trim();
+      
+      // オッズと人気の抽出
+      let odds = '';
+      let popularity = '';
+      
+      const oddsSelectors = ['.Popular.Txt_R', '.Odds', 'td:nth-child(10)'];
+      const popularitySelectors = ['.Popular.Txt_C span', '.Popular span', 'td:nth-child(11)'];
+      
+      for (const selector of oddsSelectors) {
+        const cell = $(element).find(selector);
+        if (cell.length > 0) {
+          odds = cell.text().trim().replace(/[^\d\.]/g, '');
+          if (odds) break;
+        }
+      }
+      
+      for (const selector of popularitySelectors) {
+        const cell = $(element).find(selector);
+        if (cell.length > 0) {
+          popularity = cell.text().trim().replace(/\D/g, '');
+          if (popularity) break;
+        }
+      }
 
-      horses.push({
-        frameNumber: parseInt(frameNumber, 10) || 0,
-        horseNumber: parseInt(horseNumber, 10) || 0,
-        horseName,
-        jockey,
-        trainer,
-        weight,
-        odds: parseFloat(odds) || 0,
-        popularity: parseInt(popularity, 10) || 0
-      });
+      // 馬情報の追加（必須項目があれば）
+      if (horseName && (horseNumber || frameNumber)) {
+        horses.push({
+          frameNumber: parseInt(frameNumber, 10) || 0,
+          horseNumber: parseInt(horseNumber, 10) || 0,
+          horseName: cleanJapaneseText(horseName),
+          jockey: cleanJapaneseText(jockey || '不明'),
+          trainer: cleanJapaneseText(trainer || '不明'),
+          weight: weight || '',
+          odds: parseFloat(odds) || 0,
+          popularity: parseInt(popularity, 10) || 0
+        });
+      }
     });
 
     const raceInfo = {
       id: raceId,
-      name: raceName,
+      name: cleanJapaneseText(raceName),
       time: raceTime,
-      raceDetails,
+      raceDetails: cleanJapaneseText(raceDetails),
       horses
     };
 
@@ -212,6 +306,169 @@ export async function fetchNarRaceEntries(raceId) {
     logger.error(`NAR 出馬表の取得中にエラーが発生しました: ${error}`);
     throw error;
   }
+}
+
+/**
+ * 払戻情報を抽出する関数
+ * @param {CheerioStatic} $ - Cheerioオブジェクト
+ * @param {Cheerio} payoutTable - 払戻表を含む要素
+ * @param {string} selector - 払戻情報のセレクタ
+ * @param {Array} targetArray - 結果を格納する配列
+ * @param {boolean} isMultiple - 複数の組み合わせがあるかどうか
+ */
+function extractNarPayout($, payoutTable, selector, targetArray, isMultiple) {
+  const elements = payoutTable.find(selector);
+  
+  if (elements.length === 0) {
+    logger.debug(`NAR: ${selector} の要素が見つかりません`);
+    return;
+  }
+  
+  elements.each((index, element) => {
+    try {
+      if (isMultiple) {
+        // 複数結果がある場合（複勝・ワイド）の処理
+        const numberGroups = [];
+        
+        // 馬番グループを抽出
+        $(element).find('.Result ul, .Result div').each((i, group) => {
+          const numbers = [];
+          $(group).find('span, li').each((j, item) => {
+            const num = $(item).text().trim().replace(/\D/g, '');
+            if (num) numbers.push(parseInt(num, 10));
+          });
+          
+          if (numbers.length > 0) {
+            numberGroups.push(numbers);
+          }
+        });
+        
+        // グループが見つからない場合はすべての数字を検索
+        if (numberGroups.length === 0) {
+          const numberElements = $(element).find('.Result span, .Result li');
+          const numbers = [];
+          
+          numberElements.each((i, el) => {
+            const num = $(el).text().trim().replace(/\D/g, '');
+            if (num) {
+              numbers.push(parseInt(num, 10));
+            }
+          });
+          
+          // 複勝の場合は個別の馬番を分ける
+          if (selector === '.Fukusho') {
+            numbers.forEach(n => {
+              numberGroups.push([n]);
+            });
+          } 
+          // ワイドの場合は2つずつペアにする
+          else if (selector === '.Wide' && numbers.length >= 2) {
+            for (let i = 0; i < numbers.length; i += 2) {
+              if (i + 1 < numbers.length) {
+                numberGroups.push([numbers[i], numbers[i + 1]]);
+              }
+            }
+          }
+        }
+        
+        // 払戻金と人気を抽出（複数の場合は分割して取得）
+        const payoutText = $(element).find('.Payout').text().trim();
+        const popularityText = $(element).find('.Ninki').text().trim();
+        
+        const payoutValues = [];
+        const popularityValues = [];
+        
+        // 円で区切る（複数の払戻がある場合）
+        payoutText.split(/円/).forEach(p => {
+          const cleaned = p.trim().replace(/[^\d]/g, '');
+          if (cleaned) payoutValues.push(parseInt(cleaned, 10));
+        });
+        
+        // 人気で区切る（複数の人気順がある場合）
+        popularityText.split(/人気/).forEach(p => {
+          const cleaned = p.trim().replace(/[^\d]/g, '');
+          if (cleaned) popularityValues.push(parseInt(cleaned, 10));
+        });
+        
+        // 払戻情報が不足している場合は追加
+        while (payoutValues.length < numberGroups.length) {
+          payoutValues.push(0);
+        }
+        
+        while (popularityValues.length < numberGroups.length) {
+          popularityValues.push(0);
+        }
+        
+        // 各組合せの払戻情報を作成
+        for (let i = 0; i < numberGroups.length; i++) {
+          if (i < payoutValues.length && payoutValues[i] > 0) {
+            targetArray.push({
+              numbers: numberGroups[i],
+              payout: payoutValues[i],
+              popularity: i < popularityValues.length ? popularityValues[i] : 0
+            });
+          }
+        }
+      } else {
+        // 単一結果の処理
+        const numbers = [];
+        
+        // 様々なセレクタを試行
+        const numberSelectors = [
+          '.Result span', 
+          '.Result li', 
+          '.Result ul li span',
+          '.Result div span'
+        ];
+        
+        // いずれかのセレクタで馬番を取得
+        for (const numSelector of numberSelectors) {
+          $(element).find(numSelector).each((i, el) => {
+            const num = $(el).text().trim().replace(/\D/g, '');
+            if (num) numbers.push(parseInt(num, 10));
+          });
+          
+          if (numbers.length > 0) break;
+        }
+        
+        // 複数のセレクタで払戻金と人気を取得
+        const payoutSelectors = ['.Payout span', '.Payout'];
+        const popularitySelectors = ['.Ninki span', '.Ninki'];
+        
+        let payoutText = '';
+        let popularityText = '';
+        
+        for (const pSelector of payoutSelectors) {
+          const elem = $(element).find(pSelector);
+          if (elem.length > 0) {
+            payoutText = elem.text().trim();
+            break;
+          }
+        }
+        
+        for (const popSelector of popularitySelectors) {
+          const elem = $(element).find(popSelector);
+          if (elem.length > 0) {
+            popularityText = elem.text().trim();
+            break;
+          }
+        }
+        
+        const payout = parseInt(payoutText.replace(/[^\d]/g, ''), 10) || 0;
+        const popularity = parseInt(popularityText.replace(/[^\d]/g, ''), 10) || 0;
+        
+        if (numbers.length > 0 && payout > 0) {
+          targetArray.push({
+            numbers,
+            payout,
+            popularity
+          });
+        }
+      }
+    } catch (err) {
+      logger.error(`NAR: ${selector} 払戻情報の抽出でエラー: ${err}`);
+    }
+  });
 }
 
 /**
@@ -242,8 +499,22 @@ export async function fetchNarRaceResults(raceId) {
 
     const $ = cheerio.load(html);
 
-    // レース結果が表示されているかを確認
-    const hasResults = $('.ResultTableWrap, .Race_Result_Table, .Payout_Detail_Table').length > 0;
+    // レース結果が表示されているかを確認（複数のセレクタを試行）
+    const resultSelectors = [
+      '.ResultTableWrap', 
+      '.Race_Result_Table', 
+      '.Payout_Detail_Table',
+      '.RaceTableArea'
+    ];
+    
+    let hasResults = false;
+    
+    for (const selector of resultSelectors) {
+      if ($(selector).length > 0) {
+        hasResults = true;
+        break;
+      }
+    }
 
     if (!hasResults) {
       logger.warn(`レース ${raceId} の結果データが見つかりません。まだレースが終了していない可能性があります。`);
@@ -266,274 +537,163 @@ export async function fetchNarRaceResults(raceId) {
     const results = [];
 
     try {
-      // ここでの実装は、サイト構造に応じて調整が必要です
-      $('.Race_Result_Table tr').each((index, element) => {
-        if (index > 0) { // ヘッダー行をスキップ
-          try {
-            const order = $(element).find('td').eq(0).text().trim();
-            const frameNumber = $(element).find('td').eq(1).text().trim();
-            const horseNumber = $(element).find('td').eq(2).text().trim();
-            const horseName = $(element).find('td').eq(3).find('a').text().trim();
-            const jockey = $(element).find('td').eq(6).find('a').text().trim();
-
-            if (order && horseName) {
-              results.push({
-                order: parseInt(order, 10) || 0,
-                frameNumber: parseInt(frameNumber, 10) || 0,
-                horseNumber: parseInt(horseNumber, 10) || 0,
-                horseName,
-                jockey
-              });
-            }
-          } catch (rowError) {
-            logger.error(`NAR 着順情報の行解析中にエラー: ${rowError}`);
-            // 続行する
-          }
-        }
-      });
-
-      logger.debug(`レース ${raceId} の着順情報: ${results.length}件`);
-    } catch (resultsError) {
-      logger.error(`NAR 着順情報の取得中にエラー: ${resultsError}`);
-      // 結果が取得できなくても続行
-    }
-
-    // ここでの実装は、サイト構造に応じて調整が必要です
-    $('.Race_Result_Table tr').each((index, element) => {
-      if (index > 0) { // ヘッダー行をスキップ
-        const order = $(element).find('td').eq(0).text().trim();
-        const frameNumber = $(element).find('td').eq(1).text().trim();
-        const horseNumber = $(element).find('td').eq(2).text().trim();
-        const horseName = $(element).find('td').eq(3).find('a').text().trim();
-        const jockey = $(element).find('td').eq(6).find('a').text().trim();
-
-        if (order && horseName) {
-          results.push({
-            order: parseInt(order, 10) || 0,
-            frameNumber: parseInt(frameNumber, 10) || 0,
-            horseNumber: parseInt(horseNumber, 10) || 0,
-            horseName,
-            jockey
-          });
+      // 着順情報の抽出（複数のセレクタを試行）
+      const resultTableSelectors = [
+        '.Race_Result_Table tr',
+        '.RaceTable01 tr',
+        '.ResultTableWrap table tr'
+      ];
+      
+      let resultRows = [];
+      
+      // いずれかのセレクタでテーブル行を取得
+      for (const selector of resultTableSelectors) {
+        const rows = $(selector);
+        if (rows.length > 1) { // ヘッダー行を除いて1つ以上の行があれば採用
+          resultRows = rows;
+          break;
         }
       }
-    });
-
-    try {
-      // 単勝
-      try {
-        $('.Payout_Detail_Table .Tansho').each((index, element) => {
-          try {
-            const numbers = [];
-            $(element).find('.Result div span').each((i, el) => {
-              const num = $(el).text().trim();
-              if (num) numbers.push(parseInt(num, 10));
-            });
-
-            const payout = $(element).find('.Payout span').text().trim().replace(/[^\d]/g, '');
-            const popularity = $(element).find('.Ninki span').text().trim().replace(/[^\d]/g, '');
-
-            if (numbers.length > 0 && payout) {
-              payouts.tansho.push({
-                numbers,
-                payout: parseInt(payout, 10) || 0,
-                popularity: parseInt(popularity, 10) || 0
-              });
+      
+      resultRows.each((index, row) => {
+        // ヘッダー行をスキップ
+        if (index === 0 || $(row).find('th').length > 0) {
+          return;
+        }
+        
+        try {
+          const cells = $(row).find('td');
+          
+          // 各セルからデータを抽出
+          let order = '';
+          let frameNumber = '';
+          let horseNumber = '';
+          let horseName = '';
+          let jockey = '';
+          
+          // テーブル構造に応じて柔軟に対応
+          for (let i = 0; i < cells.length; i++) {
+            const cellText = $(cells[i]).text().trim();
+            
+            // 位置に基づいて情報を判別
+            if (i === 0 && /^[0-9０-９優除中失]+$/.test(cellText)) {
+              order = cellText;
+            } else if (i === 1 && /^[1-8]$/.test(cellText)) {
+              frameNumber = cellText;
+            } else if (i === 2 && /^\d{1,2}$/.test(cellText)) {
+              horseNumber = cellText;
+            } else if (i >= 3 && i <= 4 && $(cells[i]).find('a').length > 0) {
+              horseName = $(cells[i]).find('a').text().trim();
+            } else if (i >= 6 && i <= 7 && $(cells[i]).find('a').length > 0) {
+              jockey = $(cells[i]).find('a').text().trim();
             }
-          } catch (err) {
-            logger.error(`NAR 単勝情報の処理でエラー: ${err}`);
+            
+            // セルの内容から種類を自動判別
+            if (!order && /^[0-9０-９優除中失]+$/.test(cellText)) {
+              order = cellText;
+            } else if (!frameNumber && /^[1-8]$/.test(cellText)) {
+              frameNumber = cellText;
+            } else if (!horseNumber && /^\d{1,2}$/.test(cellText)) {
+              horseNumber = cellText;
+            } else if (!horseName && $(cells[i]).find('a').length > 0) {
+              horseName = $(cells[i]).find('a').text().trim();
+            } else if (!jockey && i > 3 && $(cells[i]).find('a').length > 0) {
+              jockey = $(cells[i]).find('a').text().trim();
+            }
           }
-        });
-      } catch (tanshoError) {
-        logger.error(`NAR 単勝情報の取得でエラー: ${tanshoError}`);
-      }
-
-      // 複勝
-      $('.Payout_Detail_Table .Fukusho').each((index, element) => {
-        const allNumbers = [];
-
-        // 複数の馬番を取得
-        $(element).find('.Result div span').each((i, el) => {
-          const num = $(el).text().trim();
-          if (num) allNumbers.push(parseInt(num, 10));
-        });
-
-        // 払戻金を取得（改行で分割）
-        const payoutText = $(element).find('.Payout span').text().trim();
-        const payoutValues = payoutText.split('円').map(p => p.trim().replace(/[^\d]/g, '')).filter(p => p);
-
-        // 人気を取得（改行で分割）
-        const popularityText = $(element).find('.Ninki span').text().trim();
-        const popularityValues = popularityText.split('人気').map(p => p.trim().replace(/[^\d]/g, '')).filter(p => p);
-
-        // 非重複の馬番を取得
-        const uniqueNumbers = [...new Set(allNumbers.filter(n => n))];
-
-        // 複勝は馬番ごとに分ける
-        for (let i = 0; i < uniqueNumbers.length; i++) {
-          if (uniqueNumbers[i] && payoutValues[i]) {
-            payouts.fukusho.push({
-              numbers: [uniqueNumbers[i]],
-              payout: parseInt(payoutValues[i], 10) || 0,
-              popularity: parseInt(popularityValues[i], 10) || 0
-            });
-          }
-        }
-      });
-
-      // 枠連
-      $('.Payout_Detail_Table .Wakuren').each((index, element) => {
-        const numbers = [];
-        $(element).find('.Result ul li span').each((i, el) => {
-          const num = $(el).text().trim();
-          if (num) numbers.push(parseInt(num, 10));
-        });
-
-        const payout = $(element).find('.Payout span').text().trim().replace(/[^\d]/g, '');
-        const popularity = $(element).find('.Ninki span').text().trim().replace(/[^\d]/g, '');
-
-        if (numbers.length > 0 && payout) {
-          payouts.wakuren.push({
-            numbers,
-            payout: parseInt(payout, 10) || 0,
-            popularity: parseInt(popularity, 10) || 0
-          });
-        }
-      });
-
-      // 馬連
-      $('.Payout_Detail_Table .Umaren').each((index, element) => {
-        const numbers = [];
-        $(element).find('.Result ul li span').each((i, el) => {
-          const num = $(el).text().trim();
-          if (num) numbers.push(parseInt(num, 10));
-        });
-
-        const payout = $(element).find('.Payout span').text().trim().replace(/[^\d]/g, '');
-        const popularity = $(element).find('.Ninki span').text().trim().replace(/[^\d]/g, '');
-
-        if (numbers.length > 0 && payout) {
-          payouts.umaren.push({
-            numbers,
-            payout: parseInt(payout, 10) || 0,
-            popularity: parseInt(popularity, 10) || 0
-          });
-        }
-      });
-
-      // ワイド
-      $('.Payout_Detail_Table .Wide').each((index, element) => {
-        const allUlElements = $(element).find('.Result ul');
-        const allPayouts = $(element).find('.Payout span').text().trim().split('円');
-        const allPopularities = $(element).find('.Ninki span').text().trim().split('人気');
-
-        allUlElements.each((uliIdx, uliElement) => {
-          const numbers = [];
-          $(uliElement).find('li span').each((i, el) => {
-            const num = $(el).text().trim();
-            if (num) numbers.push(parseInt(num, 10));
-          });
-
-          const payout = allPayouts[uliIdx] ? allPayouts[uliIdx].replace(/[^\d]/g, '') : '';
-          const popularity = allPopularities[uliIdx] ? allPopularities[uliIdx].replace(/[^\d]/g, '') : '';
-
-          if (numbers.length > 0 && payout) {
-            payouts.wide.push({
-              numbers,
-              payout: parseInt(payout, 10) || 0,
-              popularity: parseInt(popularity, 10) || 0
-            });
-          }
-        });
-      });
-
-      // 馬単
-      $('.Payout_Detail_Table .Umatan').each((index, element) => {
-        const numbers = [];
-        $(element).find('.Result ul li span').each((i, el) => {
-          const num = $(el).text().trim();
-          if (num) numbers.push(parseInt(num, 10));
-        });
-
-        const payout = $(element).find('.Payout span').text().trim().replace(/[^\d]/g, '');
-        const popularity = $(element).find('.Ninki span').text().trim().replace(/[^\d]/g, '');
-
-        if (numbers.length > 0 && payout) {
-          payouts.umatan.push({
-            numbers,
-            payout: parseInt(payout, 10) || 0,
-            popularity: parseInt(popularity, 10) || 0
-          });
-        }
-      });
-
-      // 三連複（NAR では Fuku3 クラスを使用）
-      $('.Payout_Detail_Table .Fuku3').each((index, element) => {
-        const numbers = [];
-        $(element).find('.Result ul li span').each((i, el) => {
-          const num = $(el).text().trim();
-          if (num) numbers.push(parseInt(num, 10));
-        });
-
-        const payout = $(element).find('.Payout span').text().trim().replace(/[^\d]/g, '');
-        const popularity = $(element).find('.Ninki span').text().trim().replace(/[^\d]/g, '');
-
-        if (numbers.length > 0 && payout) {
-          payouts.sanrenpuku.push({
-            numbers,
-            payout: parseInt(payout, 10) || 0,
-            popularity: parseInt(popularity, 10) || 0
-          });
-        }
-      });
-
-      // 三連単（NAR では Tan3 クラスを使用）
-      $('.Payout_Detail_Table .Tan3').each((index, element) => {
-        const numbers = [];
-        $(element).find('.Result ul li span').each((i, el) => {
-          const num = $(el).text().trim();
-          if (num) numbers.push(parseInt(num, 10));
-        });
-
-        const payout = $(element).find('.Payout span').text().trim().replace(/[^\d]/g, '');
-        const popularity = $(element).find('.Ninki span').text().trim().replace(/[^\d]/g, '');
-
-        if (numbers.length > 0 && payout) {
-          payouts.sanrentan.push({
-            numbers,
-            payout: parseInt(payout, 10) || 0,
-            popularity: parseInt(popularity, 10) || 0
-          });
-        }
-      });
-
-      // 着順情報を取得（NAR ではレース結果ページの構造が異なる場合があります）
-      const results = [];
-
-      // ここでの実装は、サイト構造に応じて調整が必要です
-      $('.Race_Result_Table tr').each((index, element) => {
-        if (index > 0) { // ヘッダー行をスキップ
-          const order = $(element).find('td').eq(0).text().trim();
-          const frameNumber = $(element).find('td').eq(1).text().trim();
-          const horseNumber = $(element).find('td').eq(2).text().trim();
-          const horseName = $(element).find('td').eq(3).find('a').text().trim();
-          const jockey = $(element).find('td').eq(6).find('a').text().trim();
-
-          if (order && horseName) {
+          
+          // 有効なデータがあれば結果に追加（最低限、馬名か馬番があれば）
+          if ((order || frameNumber || horseNumber) && (horseName || horseNumber)) {
             results.push({
-              order: parseInt(order, 10) || 0,
+              order: /^\d+$/.test(order) ? parseInt(order, 10) : 0,
               frameNumber: parseInt(frameNumber, 10) || 0,
               horseNumber: parseInt(horseNumber, 10) || 0,
-              horseName,
-              jockey
+              horseName: cleanJapaneseText(horseName || '不明'),
+              jockey: cleanJapaneseText(jockey || '不明')
             });
           }
+        } catch (rowError) {
+          logger.error(`NAR: 着順情報の行処理でエラー: ${rowError}`);
         }
       });
+      
+      logger.debug(`レース ${raceId} の着順情報: ${results.length}件`);
+      
+      // 払戻情報の抽出（複数のセレクタを試行）
+      const payoutSelectors = ['.Payout_Detail_Table', '.Payout'];
+      let payoutTable = null;
+      
+      for (const selector of payoutSelectors) {
+        const table = $(selector);
+        if (table.length > 0) {
+          payoutTable = table;
+          break;
+        }
+      }
+      
+      if (payoutTable) {
+        // 単勝
+        try {
+          extractNarPayout($, payoutTable, '.Tansho', payouts.tansho, false);
+        } catch (e) {
+          logger.error(`NAR: 単勝情報の抽出でエラー: ${e}`);
+        }
+        
+        // 複勝（複数結果あり）
+        try {
+          extractNarPayout($, payoutTable, '.Fukusho', payouts.fukusho, true);
+        } catch (e) {
+          logger.error(`NAR: 複勝情報の抽出でエラー: ${e}`);
+        }
+        
+        // 枠連
+        try {
+          extractNarPayout($, payoutTable, '.Wakuren', payouts.wakuren, false);
+        } catch (e) {
+          logger.error(`NAR: 枠連情報の抽出でエラー: ${e}`);
+        }
+        
+        // 馬連
+        try {
+          extractNarPayout($, payoutTable, '.Umaren', payouts.umaren, false);
+        } catch (e) {
+          logger.error(`NAR: 馬連情報の抽出でエラー: ${e}`);
+        }
+        
+        // ワイド（複数結果あり）
+        try {
+          extractNarPayout($, payoutTable, '.Wide', payouts.wide, true);
+        } catch (e) {
+          logger.error(`NAR: ワイド情報の抽出でエラー: ${e}`);
+        }
+        
+        // 馬単
+        try {
+          extractNarPayout($, payoutTable, '.Umatan', payouts.umatan, false);
+        } catch (e) {
+          logger.error(`NAR: 馬単情報の抽出でエラー: ${e}`);
+        }
+        
+        // 三連複
+        try {
+          extractNarPayout($, payoutTable, '.Fuku3', payouts.sanrenpuku, false);
+        } catch (e) {
+          logger.error(`NAR: 三連複情報の抽出でエラー: ${e}`);
+        }
+        
+        // 三連単
+        try {
+          extractNarPayout($, payoutTable, '.Tan3', payouts.sanrentan, false);
+        } catch (e) {
+          logger.error(`NAR: 三連単情報の抽出でエラー: ${e}`);
+        }
+      } else {
+        logger.warn(`レース ${raceId} の払戻情報テーブルが見つかりません。`);
+      }
 
       const raceResults = {
         id: raceId,
-        results: results || [], // resultsが未定義の場合は空配列を使用
+        results: results || [],
         payouts
       };
 
@@ -558,7 +718,7 @@ export async function fetchNarRaceResults(raceId) {
 
       return raceResults;
     } catch (error) {
-      logger.error(`NAR レース結果の取得中にエラーが発生しました: ${error}`);
+      logger.error(`NAR レース結果の処理中にエラーが発生しました: ${error}`);
       throw error;
     }
   } catch (error) {
