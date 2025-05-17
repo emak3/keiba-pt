@@ -46,7 +46,8 @@ const venueCodeMap = {
   '58': '札幌(地方競馬)',
   '59': '函館(地方競馬)',
   '60': '新潟(地方競馬)',
-  '61': '中京(地方競馬)'
+  '61': '中京(地方競馬)',
+  '65': '帯広(ば)'
 };
 
 export default {
@@ -103,17 +104,20 @@ export default {
       
       for (const venueCode in venueGroups) {
         const firstRace = venueGroups[venueCode][0];
+        // 会場名を整形
+        const venueName = cleanVenueName(firstRace.venue);
+        
         // 会場コードが1-10ならJRA、それ以外はNAR
         if (parseInt(venueCode) >= 1 && parseInt(venueCode) <= 10) {
           jraVenues.push({
             code: venueCode,
-            name: venueCodeMap[venueCode] || firstRace.venue,
+            name: venueCodeMap[venueCode] || venueName,
             type: 'JRA'
           });
         } else {
           narVenues.push({
             code: venueCode,
-            name: venueCodeMap[venueCode] || firstRace.venue,
+            name: venueCodeMap[venueCode] || venueName,
             type: 'NAR'
           });
         }
@@ -353,6 +357,23 @@ function extractVenueCode(raceId) {
 }
 
 /**
+ * 会場名から「○回△△△日目」などの余分な情報を削除
+ * @param {string} venue - 会場名
+ * @returns {string} 整形された会場名
+ */
+function cleanVenueName(venue) {
+  if (!venue) return '不明';
+  
+  // 「○回」や「○日目」などのパターンを含まないメイン会場名を抽出
+  const mainVenueMatch = venue.match(/(?:[\d]+回)?([^\d]+)(?:[\d]+日目)?/);
+  if (mainVenueMatch && mainVenueMatch[1]) {
+    return mainVenueMatch[1].trim();
+  }
+  
+  return venue;
+}
+
+/**
  * 会場別のレース一覧を表示
  * @param {MessageComponentInteraction} interaction - インタラクション
  * @param {string} venueCode - 会場コード
@@ -376,15 +397,23 @@ async function displayVenueRaces(interaction, venueCode, dateString, history, al
   // 日付の表示用フォーマット
   const displayDate = `${dateString.slice(0, 4)}年${dateString.slice(4, 6)}月${dateString.slice(6, 8)}日`;
   
-  // 会場名を取得
-  const venueName = venueCodeMap[venueCode] || venueRaces[0].venue;
+  // 会場名と開催回を取得
+  const firstRace = venueRaces[0];
+  const venueName = venueCodeMap[venueCode] || cleanVenueName(firstRace.venue);
+  
+  // 開催回情報を抽出
+  let roundInfo = '';
+  const roundMatch = firstRace.venue.match(/([\d]+回.+[\d]+日目)/);
+  if (roundMatch) {
+    roundInfo = ` (${roundMatch[1]})`;
+  }
   
   // 会場種別（JRAかNARか）
   const venueType = parseInt(venueCode) >= 1 && parseInt(venueCode) <= 10 ? 'JRA' : 'NAR';
   
   // レース一覧のエンベッド
   const raceListEmbed = new EmbedBuilder()
-    .setTitle(`${displayDate} ${venueName}（${venueType}）レース一覧`)
+    .setTitle(`${displayDate} ${venueName}${roundInfo}（${venueType}）レース一覧`)
     .setColor(venueType === 'JRA' ? 0x00b0f4 : 0xf47200)
     .setTimestamp();
   
@@ -427,7 +456,7 @@ async function displayVenueRaces(interaction, venueCode, dateString, history, al
   
   // レスポンスを更新
   await interaction.editReply({
-    content: `${displayDate} ${venueName}（${venueType}）のレース一覧（${venueRaces.length}件）\n各レースの馬券購入は \`/bet\` コマンドで行えます。`,
+    content: `${displayDate} ${venueName}${roundInfo}（${venueType}）のレース一覧（${venueRaces.length}件）\n各レースの馬券購入は \`/bet\` コマンドで行えます。`,
     embeds: [raceListEmbed],
     components: [backRow, navigationRow]
   });

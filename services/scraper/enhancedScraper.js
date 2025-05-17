@@ -89,6 +89,65 @@ function getTodayDateString() {
 }
 
 /**
+ * 会場名を整形：「○回○○○日目」の形式を保持しつつ、文字化けを修正
+ * @param {string} venueName - 元の会場名
+ * @returns {string} 整形された会場名
+ */
+function formatVenueName(venueName) {
+    if (!venueName) return '不明競馬場';
+    
+    // 「○回」「○日目」のパターンを抽出
+    const roundPattern = /([\d]+回)/;
+    const dayPattern = /([\d]+日目)/;
+    
+    // メイン会場名を抽出（数字を含まない部分）
+    const mainVenuePattern = /(?:[\d]+回)?([^\d]+)(?:[\d]+日目)?/;
+    
+    const roundMatch = venueName.match(roundPattern);
+    const dayMatch = venueName.match(dayPattern);
+    const mainVenueMatch = venueName.match(mainVenuePattern);
+    
+    let mainVenue = '';
+    let roundInfo = '';
+    let dayInfo = '';
+    
+    if (mainVenueMatch && mainVenueMatch[1]) {
+        mainVenue = mainVenueMatch[1].trim();
+    }
+    
+    if (roundMatch && roundMatch[1]) {
+        roundInfo = roundMatch[1];
+    }
+    
+    if (dayMatch && dayMatch[1]) {
+        dayInfo = dayMatch[1];
+    }
+    
+    // 文字化けチェック
+    if (/[\uFFFD\u30FB\u309A-\u309C]/.test(mainVenue) || 
+        mainVenue.includes('��') || 
+        mainVenue.includes('□') ||
+        mainVenue.includes('�')) {
+        mainVenue = validateVenueName(mainVenue);
+    }
+    
+    // 整形した会場名を組み立て
+    let formattedName = '';
+    
+    if (roundInfo) {
+        formattedName += roundInfo + ' ';
+    }
+    
+    formattedName += mainVenue;
+    
+    if (dayInfo) {
+        formattedName += ' ' + dayInfo;
+    }
+    
+    return formattedName.trim();
+}
+
+/**
  * 強化版JRAレース一覧取得
  * @param {string} dateString - YYYYMMDD形式の日付
  * @returns {Promise<Array>} レース一覧
@@ -106,8 +165,10 @@ export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()
         // 競馬場ごとに処理
         $('.RaceList_Box').each((venueIndex, venueElement) => {
             // 競馬場名を取得
-            const venueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
-            logger.debug(`競馬場${venueIndex + 1}: ${venueName}`);
+            const rawVenueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
+            // 「○回○○○日目」の形式を保持しつつ整形
+            const venueName = formatVenueName(rawVenueName);
+            logger.debug(`競馬場${venueIndex + 1}: ${venueName} (元: ${rawVenueName})`);
 
             // 各レースを処理
             $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
@@ -152,14 +213,13 @@ export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()
                         logger.warn(`レース名が文字化けしている可能性: ${raceName}`);
                     }
 
-                    // 検証済みの競馬場名とレース名を使用
-                    const validatedVenue = validateVenueName(venueName);
-                    const validatedRaceName = validateRaceName(raceName, validatedVenue, parseInt(raceNumber, 10));
+                    // 検証済みのレース名を使用
+                    const validatedRaceName = validateRaceName(raceName, venueName, parseInt(raceNumber, 10));
 
                     races.push({
                         id: raceId,
                         type: 'jra',
-                        venue: validatedVenue,
+                        venue: venueName,
                         number: parseInt(raceNumber, 10) || raceIndex + 1,
                         name: validatedRaceName,
                         time: raceTime,
@@ -203,8 +263,10 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
         // 競馬場ごとに処理
         $('.RaceList_Box').each((venueIndex, venueElement) => {
             // 競馬場名を取得
-            const venueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
-            logger.debug(`競馬場${venueIndex + 1}: ${venueName}`);
+            const rawVenueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
+            // 「○回○○○日目」の形式を保持しつつ整形
+            const venueName = formatVenueName(rawVenueName);
+            logger.debug(`競馬場${venueIndex + 1}: ${venueName} (元: ${rawVenueName})`);
 
             // 各レースを処理
             $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
@@ -249,14 +311,13 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
                         logger.warn(`レース名が文字化けしている可能性: ${raceName}`);
                     }
 
-                    // 検証済みの競馬場名とレース名を使用
-                    const validatedVenue = validateVenueName(venueName);
-                    const validatedRaceName = validateRaceName(raceName, validatedVenue, parseInt(raceNumber, 10));
+                    // 検証済みのレース名を使用
+                    const validatedRaceName = validateRaceName(raceName, venueName, parseInt(raceNumber, 10));
 
                     races.push({
                         id: raceId,
                         type: 'nar',
-                        venue: validatedVenue,
+                        venue: venueName,
                         number: parseInt(raceNumber, 10) || raceIndex + 1,
                         name: validatedRaceName,
                         time: raceTime,
