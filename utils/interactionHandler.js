@@ -1,8 +1,8 @@
-import { getRaceById } from '../services/database/raceService.js';
-import { placeBet } from '../services/database/betService.js';
-import { getUser } from '../services/database/userService.js';
-import { EmbedBuilder } from 'discord.js';
-import logger from '../utils/logger.js';
+import { getRaceById } from './services/database/raceService.js';
+import { placeBet } from './services/database/betService.js';
+import { getUser } from './services/database/userService.js';
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import logger from './utils/logger.js';
 
 /**
  * 全インタラクションを処理する関数

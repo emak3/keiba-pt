@@ -1,8 +1,8 @@
 import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { getRacesByDate } from '../../services/database/raceService.js';
-import { saveUser } from '../../services/database/userService.js';
+import { getRacesByDate } from '../services/database/raceService.js';
+import { saveUser } from '../services/database/userService.js';
 import dayjs from 'dayjs';
-import logger from '../../utils/logger.js';
+import logger from '../utils/logger.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -73,6 +73,7 @@ export default {
         
         venueRaces.forEach(race => {
           const statusEmoji = getStatusEmoji(race.status);
+          logger.debug(`レース ${race.id} のステータス: ${race.status}, 絵文字: ${statusEmoji}`);
           const raceLink = race.link || '詳細情報なし';
           description += `${statusEmoji} **${race.number}R** ${race.time} 【${race.name}】\n`;
           description += `→ レースID: \`${race.id}\`\n\n`;

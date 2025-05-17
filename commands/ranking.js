@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { getPointsRanking } from '../../services/database/userService.js';
-import logger from '../../utils/logger.js';
+import { getPointsRanking } from '../services/database/userService.js';
+import logger from '../utils/logger.js';
 
 export default {
   data: new SlashCommandBuilder()

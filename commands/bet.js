@@ -9,10 +9,10 @@ import {
   TextInputBuilder,
   TextInputStyle
 } from 'discord.js';
-import { getRaceById } from '../../services/database/raceService.js';
-import { getUser, saveUser } from '../../services/database/userService.js';
-import { placeBet } from '../../services/database/betService.js';
-import logger from '../../utils/logger.js';
+import { getRaceById } from '../services/database/raceService.js';
+import { getUser, saveUser } from '../services/database/userService.js';
+import { placeBet } from '../services/database/betService.js';
+import logger from '../utils/logger.js';
 
 export default {
   data: new SlashCommandBuilder()

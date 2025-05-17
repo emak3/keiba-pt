@@ -94,6 +94,12 @@ export async function saveNarRace(race) {
  */
 export async function updateJraRaceResult(raceId, resultData) {
   try {
+    // 結果データがnullの場合は処理しない
+    if (!resultData) {
+      logger.warn(`レース ${raceId} の結果データがないため更新をスキップします。`);
+      return;
+    }
+    
     const db = getDb();
     const raceRef = doc(db, 'races', raceId);
     
@@ -104,11 +110,11 @@ export async function updateJraRaceResult(raceId, resultData) {
       // 既存データを更新
       await updateDoc(raceRef, {
         status: 'completed',
-        results: resultData.results,
-        payouts: resultData.payouts,
+        results: resultData.results || [],
+        payouts: resultData.payouts || {},
         updatedAt: new Date().toISOString()
       });
-      logger.info(`JRA レース ${raceId} の結果を更新しました。`);
+      logger.info(`JRA レース ${raceId} の結果を更新しました。ステータス: completed`);
       
       // 関連する馬券の処理を実行
       await processBetsForRace(raceId);
@@ -129,6 +135,12 @@ export async function updateJraRaceResult(raceId, resultData) {
  */
 export async function updateNarRaceResult(raceId, resultData) {
   try {
+    // 結果データがnullの場合は処理しない
+    if (!resultData) {
+      logger.warn(`レース ${raceId} の結果データがないため更新をスキップします。`);
+      return;
+    }
+    
     const db = getDb();
     const raceRef = doc(db, 'races', raceId);
     
@@ -139,11 +151,11 @@ export async function updateNarRaceResult(raceId, resultData) {
       // 既存データを更新
       await updateDoc(raceRef, {
         status: 'completed',
-        results: resultData.results,
-        payouts: resultData.payouts,
+        results: resultData.results || [],
+        payouts: resultData.payouts || {},
         updatedAt: new Date().toISOString()
       });
-      logger.info(`NAR レース ${raceId} の結果を更新しました。`);
+      logger.info(`NAR レース ${raceId} の結果を更新しました。ステータス: completed`);
       
       // 関連する馬券の処理を実行
       await processBetsForRace(raceId);
@@ -242,9 +254,14 @@ export async function getRacesByDate(dateString) {
     
     const races = [];
     racesSnapshot.forEach(doc => {
+      const raceData = doc.data();
+      
+      // レースデータを処理し、ステータスを確認
+      const processedRace = processRaceStatus(raceData);
+      
       races.push({
         id: doc.id,
-        ...doc.data()
+        ...processedRace
       });
     });
     
@@ -264,6 +281,64 @@ export async function getRacesByDate(dateString) {
     logger.error(`日付 ${dateString} のレース取得中にエラーが発生しました: ${error}`);
     throw error;
   }
+}
+
+/**
+ * レースのステータスを現在時刻に基づいて処理
+ * @param {Object} raceData - レースデータ
+ * @returns {Object} 処理後のレースデータ
+ */
+function processRaceStatus(raceData) {
+  // レースデータのコピーを作成
+  const processedRace = { ...raceData };
+  
+  // 結果データがあれば、確実に completed に設定
+  if (processedRace.results && processedRace.results.length > 0) {
+    if (processedRace.status !== 'completed') {
+      logger.debug(`レース ${processedRace.id} は結果データがありますが、ステータスが ${processedRace.status} です。completed に更新します。`);
+      processedRace.status = 'completed';
+    }
+    return processedRace;
+  }
+  
+  // 現在時刻を取得
+  const now = new Date();
+  
+  // レース時間をパース
+  const raceDate = new Date(
+    parseInt(processedRace.date.slice(0, 4)), 
+    parseInt(processedRace.date.slice(4, 6)) - 1, 
+    parseInt(processedRace.date.slice(6, 8)), 
+    parseInt(processedRace.time.split(':')[0]), 
+    parseInt(processedRace.time.split(':')[1])
+  );
+  
+  // 発走5分前～発走後2分はin_progress
+  const beforeRace = new Date(raceDate.getTime() - 5 * 60 * 1000);
+  const afterRace = new Date(raceDate.getTime() + 2 * 60 * 1000);
+  const afterRaceCompletion = new Date(raceDate.getTime() + 10 * 60 * 1000); // 10分後には完了しているはず
+  
+  if (now > afterRaceCompletion) {
+    // レース後10分以上経過している場合は完了としてマーク
+    if (processedRace.status !== 'completed') {
+      logger.debug(`レース ${processedRace.id} は発走時刻から10分以上経過しているため、ステータスを completed に更新します。`);
+      processedRace.status = 'completed';
+    }
+  } else if (now > beforeRace && now < afterRace) {
+    // 発走直前～レース中
+    if (processedRace.status !== 'in_progress') {
+      logger.debug(`レース ${processedRace.id} は現在レース中のため、ステータスを in_progress に更新します。`);
+      processedRace.status = 'in_progress';
+    }
+  } else if (now < beforeRace) {
+    // 発走前
+    if (processedRace.status !== 'upcoming') {
+      logger.debug(`レース ${processedRace.id} はまだ発走前のため、ステータスを upcoming に更新します。`);
+      processedRace.status = 'upcoming';
+    }
+  }
+  
+  return processedRace;
 }
 
 /**

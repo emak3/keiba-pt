@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { getUser, saveUser } from '../../services/database/userService.js';
-import { getUserBets } from '../../services/database/betService.js';
-import logger from '../../utils/logger.js';
+import { getUser, saveUser } from '../services/database/userService.js';
+import { getUserBets } from '../services/database/betService.js';
+import logger from '../utils/logger.js';
 
 export default {
   data: new SlashCommandBuilder()

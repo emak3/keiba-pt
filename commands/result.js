@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { getRaceById } from '../../services/database/raceService.js';
-import { saveUser } from '../../services/database/userService.js';
-import logger from '../../utils/logger.js';
+import { getRaceById } from '../services/database/raceService.js';
+import { saveUser } from '../services/database/userService.js';
+import logger from '../utils/logger.js';
 
 export default {
   data: new SlashCommandBuilder()

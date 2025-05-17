@@ -2,7 +2,8 @@ import { CronJob } from 'cron';
 import dayjs from 'dayjs';
 import { fetchJraRaceList, fetchJraRaceResults } from '../scraper/jraScraper.js';
 import { fetchNarRaceList, fetchNarRaceResults } from '../scraper/narScraper.js';
-import { getActiveRaces } from '../database/raceService.js';
+import { fetchRaceCalendar, fetchJraRacesAlternative, fetchNarRacesAlternative } from '../scraper/alternativeScraper.js';
+import { getActiveRaces, saveJraRace, saveNarRace } from '../database/raceService.js';
 import logger from '../../utils/logger.js';
 
 let client = null;
@@ -35,11 +36,56 @@ async function fetchDailyRaces() {
     const today = dayjs().format('YYYYMMDD');
     logger.info(`本日 (${today}) のレース一覧を取得します。`);
     
-    // JRAのレース一覧を取得
-    const jraRaces = await fetchJraRaceList(today);
+    // 開催情報をまず確認
+    const calendarInfo = await fetchRaceCalendar(today);
+    logger.info(`カレンダー情報: JRA ${calendarInfo.jra.length}会場, NAR ${calendarInfo.nar.length}会場`);
     
-    // NARのレース一覧を取得
-    const narRaces = await fetchNarRaceList(today);
+    let jraRaces = [];
+    let narRaces = [];
+    
+    // 標準の方法でレースを取得
+    try {
+      jraRaces = await fetchJraRaceList(today);
+    } catch (jraError) {
+      logger.error(`標準JRA取得でエラー: ${jraError}`);
+    }
+    
+    try {
+      narRaces = await fetchNarRaceList(today);
+    } catch (narError) {
+      logger.error(`標準NAR取得でエラー: ${narError}`);
+    }
+    
+    // 標準の方法で取得できなかった場合、代替方法を試す
+    if (jraRaces.length === 0 && calendarInfo.jra.length > 0) {
+      logger.info('JRAレース情報が取得できなかったため、代替方法を試みます。');
+      try {
+        const alternativeJraRaces = await fetchJraRacesAlternative(today);
+        if (alternativeJraRaces.length > 0) {
+          logger.info(`代替方法で ${alternativeJraRaces.length} 件のJRAレースを取得しました。`);
+          // データベースに保存
+          await Promise.all(alternativeJraRaces.map(race => saveJraRace(race)));
+          jraRaces = alternativeJraRaces;
+        }
+      } catch (altJraError) {
+        logger.error(`代替JRA取得でもエラー: ${altJraError}`);
+      }
+    }
+    
+    if (narRaces.length === 0 && calendarInfo.nar.length > 0) {
+      logger.info('NARレース情報が取得できなかったため、代替方法を試みます。');
+      try {
+        const alternativeNarRaces = await fetchNarRacesAlternative(today);
+        if (alternativeNarRaces.length > 0) {
+          logger.info(`代替方法で ${alternativeNarRaces.length} 件のNARレースを取得しました。`);
+          // データベースに保存
+          await Promise.all(alternativeNarRaces.map(race => saveNarRace(race)));
+          narRaces = alternativeNarRaces;
+        }
+      } catch (altNarError) {
+        logger.error(`代替NAR取得でもエラー: ${altNarError}`);
+      }
+    }
     
     const totalRaces = jraRaces.length + narRaces.length;
     logger.info(`本日のレース取得が完了しました。JRA: ${jraRaces.length}件, NAR: ${narRaces.length}件, 合計: ${totalRaces}件`);
@@ -48,11 +94,15 @@ async function fetchDailyRaces() {
     if (client) {
       const notificationChannel = process.env.NOTIFICATION_CHANNEL_ID;
       if (notificationChannel) {
-        const channel = await client.channels.fetch(notificationChannel);
-        if (channel) {
-          await channel.send({
-            content: `🏇 **本日のレース情報を更新しました**\n中央競馬(JRA): ${jraRaces.length}件\n地方競馬(NAR): ${narRaces.length}件\n\n\`/races\` コマンドで本日のレース一覧を確認できます。`
-          });
+        try {
+          const channel = await client.channels.fetch(notificationChannel);
+          if (channel) {
+            await channel.send({
+              content: `🏇 **本日のレース情報を更新しました**\n中央競馬(JRA): ${jraRaces.length}件\n地方競馬(NAR): ${narRaces.length}件\n\n\`/races\` コマンドで本日のレース一覧を確認できます。`
+            });
+          }
+        } catch (notifyError) {
+          logger.error(`通知送信中にエラー: ${notifyError}`);
         }
       }
     }
@@ -96,24 +146,49 @@ async function checkRaceResults() {
           logger.info(`レース ${race.id} (${race.name}) の結果を取得します。`);
           
           // レース種別に応じた結果取得
-          if (race.type === 'jra') {
-            await fetchJraRaceResults(race.id);
-          } else if (race.type === 'nar') {
-            await fetchNarRaceResults(race.id);
+          let resultData = null;
+          try {
+            if (race.type === 'jra') {
+              resultData = await fetchJraRaceResults(race.id);
+              if (resultData) {
+                await updateJraRaceResult(race.id, resultData);
+                logger.info(`レース ${race.id} のステータスを completed に更新しました。`);
+              } else {
+                logger.warn(`レース ${race.id} の結果データが取得できませんでした。まだ終了していない可能性があります。`);
+              }
+            } else if (race.type === 'nar') {
+              resultData = await fetchNarRaceResults(race.id);
+              if (resultData) {
+                await updateNarRaceResult(race.id, resultData);
+                logger.info(`レース ${race.id} のステータスを completed に更新しました。`);
+              } else {
+                logger.warn(`レース ${race.id} の結果データが取得できませんでした。まだ終了していない可能性があります。`);
+              }
+            }
+          } catch (resultError) {
+            logger.error(`レース ${race.id} の結果処理中にエラーが発生しました: ${resultError}`);
+            // エラーがあっても続行
+            resultData = null;
           }
           
-          // Discordに通知（オプション）
-          if (client) {
+          // 結果が取得できた場合のみ通知
+          if (resultData && client) {
             const notificationChannel = process.env.NOTIFICATION_CHANNEL_ID;
             if (notificationChannel) {
-              const channel = await client.channels.fetch(notificationChannel);
-              if (channel) {
-                await channel.send({
-                  content: `🏁 **レース結果確定**\n${race.venue} ${race.number}R ${race.name}\n\n結果と払戻金の確認は \`/result ${race.id}\` で行えます。`
-                });
+              try {
+                const channel = await client.channels.fetch(notificationChannel);
+                if (channel) {
+                  await channel.send({
+                    content: `🏁 **レース結果確定**\n${race.venue} ${race.number}R ${race.name}\n\n結果と払戻金の確認は \`/result ${race.id}\` で行えます。`
+                  });
+                }
+              } catch (notifyError) {
+                logger.error(`通知送信中にエラー: ${notifyError}`);
               }
             }
           }
+        } else {
+          logger.debug(`レース ${race.id} はまだ終了時間を過ぎていません。(現在: ${now.format('HH:mm')}, 終了予定: ${endTime.format('HH:mm')})`);
         }
       } catch (raceError) {
         logger.error(`レース ${race.id} の結果取得中にエラーが発生しました: ${raceError}`);
