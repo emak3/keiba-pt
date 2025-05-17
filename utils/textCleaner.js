@@ -68,7 +68,7 @@ export function cleanRaceName(raceName, venue, number) {
  */
 export function cleanVenueName(venue) {
   const cleaned = cleanJapaneseText(venue);
-  
+  console.log(`うんこおおおおおおおおおおおおおおおおおおおおおおおおおおおおおおおおおお: ${venue}`)
   // 文字化けしているか空の場合は、レース場コードから推測
   if (!cleaned || cleaned.length < 2) {
     return '不明';

@@ -544,7 +544,7 @@ export async function fetchNarRaceResults(raceId) {
         '.ResultTableWrap table tr'
       ];
       
-      let resultRows = [];
+      let resultRows = null;
       
       // いずれかのセレクタでテーブル行を取得
       for (const selector of resultTableSelectors) {
@@ -555,67 +555,116 @@ export async function fetchNarRaceResults(raceId) {
         }
       }
       
-      resultRows.each((index, row) => {
-        // ヘッダー行をスキップ
-        if (index === 0 || $(row).find('th').length > 0) {
-          return;
-        }
+      if (resultRows && typeof resultRows.each === 'function') {
+        resultRows.each((index, row) => {
+          // ヘッダー行をスキップ
+          if (index === 0 || $(row).find('th').length > 0) {
+            return;
+          }
+          
+          try {
+            const cells = $(row).find('td');
+            
+            // 各セルからデータを抽出
+            let order = '';
+            let frameNumber = '';
+            let horseNumber = '';
+            let horseName = '';
+            let jockey = '';
+            
+            // テーブル構造に応じて柔軟に対応
+            for (let i = 0; i < cells.length; i++) {
+              const cellText = $(cells[i]).text().trim();
+              
+              // 位置に基づいて情報を判別
+              if (i === 0 && /^[0-9０-９優除中失]+$/.test(cellText)) {
+                order = cellText;
+              } else if (i === 1 && /^[1-8]$/.test(cellText)) {
+                frameNumber = cellText;
+              } else if (i === 2 && /^\d{1,2}$/.test(cellText)) {
+                horseNumber = cellText;
+              } else if (i >= 3 && i <= 4 && $(cells[i]).find('a').length > 0) {
+                horseName = $(cells[i]).find('a').text().trim();
+              } else if (i >= 6 && i <= 7 && $(cells[i]).find('a').length > 0) {
+                jockey = $(cells[i]).find('a').text().trim();
+              }
+              
+              // セルの内容から種類を自動判別
+              if (!order && /^[0-9０-９優除中失]+$/.test(cellText)) {
+                order = cellText;
+              } else if (!frameNumber && /^[1-8]$/.test(cellText)) {
+                frameNumber = cellText;
+              } else if (!horseNumber && /^\d{1,2}$/.test(cellText)) {
+                horseNumber = cellText;
+              } else if (!horseName && $(cells[i]).find('a').length > 0) {
+                horseName = $(cells[i]).find('a').text().trim();
+              } else if (!jockey && i > 3 && $(cells[i]).find('a').length > 0) {
+                jockey = $(cells[i]).find('a').text().trim();
+              }
+            }
+            
+            // 有効なデータがあれば結果に追加（最低限、馬名か馬番があれば）
+            if ((order || frameNumber || horseNumber) && (horseName || horseNumber)) {
+              results.push({
+                order: /^\d+$/.test(order) ? parseInt(order, 10) : 0,
+                frameNumber: parseInt(frameNumber, 10) || 0,
+                horseNumber: parseInt(horseNumber, 10) || 0,
+                horseName: cleanJapaneseText(horseName || '不明'),
+                jockey: cleanJapaneseText(jockey || '不明')
+              });
+            }
+          } catch (rowError) {
+            logger.error(`NAR: 着順情報の行処理でエラー: ${rowError}`);
+          }
+        });
+      } else {
+        // 通常のセレクタが失敗した場合、別の方法を試す
+        logger.debug(`通常のテーブル構造が見つかりませんでした。別の方法を試みます。`);
         
-        try {
-          const cells = $(row).find('td');
-          
-          // 各セルからデータを抽出
-          let order = '';
-          let frameNumber = '';
-          let horseNumber = '';
-          let horseName = '';
-          let jockey = '';
-          
-          // テーブル構造に応じて柔軟に対応
-          for (let i = 0; i < cells.length; i++) {
-            const cellText = $(cells[i]).text().trim();
-            
-            // 位置に基づいて情報を判別
-            if (i === 0 && /^[0-9０-９優除中失]+$/.test(cellText)) {
-              order = cellText;
-            } else if (i === 1 && /^[1-8]$/.test(cellText)) {
-              frameNumber = cellText;
-            } else if (i === 2 && /^\d{1,2}$/.test(cellText)) {
-              horseNumber = cellText;
-            } else if (i >= 3 && i <= 4 && $(cells[i]).find('a').length > 0) {
-              horseName = $(cells[i]).find('a').text().trim();
-            } else if (i >= 6 && i <= 7 && $(cells[i]).find('a').length > 0) {
-              jockey = $(cells[i]).find('a').text().trim();
+        // 馬名リンクから出走馬を取得する
+        const horseLinks = $('.Horse_Name a, .HorseName a');
+        
+        if (horseLinks && horseLinks.length > 0) {
+          horseLinks.each((index, link) => {
+            try {
+              const horseName = $(link).text().trim();
+              const parentRow = $(link).closest('tr');
+              
+              let order = '0';
+              let frameNumber = '0';
+              let horseNumber = '0';
+              let jockey = '不明';
+              
+              // 親行から情報を取得
+              if (parentRow.length > 0) {
+                const cells = parentRow.find('td');
+                
+                if (cells.length > 0) order = $(cells[0]).text().trim();
+                if (cells.length > 1) frameNumber = $(cells[1]).text().trim();
+                if (cells.length > 2) horseNumber = $(cells[2]).text().trim();
+                
+                // 騎手を探す
+                parentRow.find('a').each((i, a) => {
+                  const text = $(a).text().trim();
+                  if (text !== horseName && text.length > 1) {
+                    jockey = text;
+                  }
+                });
+              }
+              
+              results.push({
+                order: /^\d+$/.test(order) ? parseInt(order, 10) : 0,
+                frameNumber: parseInt(frameNumber, 10) || 0,
+                horseNumber: parseInt(horseNumber, 10) || 0,
+                horseName: cleanJapaneseText(horseName),
+                jockey: cleanJapaneseText(jockey)
+              });
+            } catch (linkError) {
+              logger.error(`NAR: 馬名リンク処理でエラー: ${linkError}`);
             }
-            
-            // セルの内容から種類を自動判別
-            if (!order && /^[0-9０-９優除中失]+$/.test(cellText)) {
-              order = cellText;
-            } else if (!frameNumber && /^[1-8]$/.test(cellText)) {
-              frameNumber = cellText;
-            } else if (!horseNumber && /^\d{1,2}$/.test(cellText)) {
-              horseNumber = cellText;
-            } else if (!horseName && $(cells[i]).find('a').length > 0) {
-              horseName = $(cells[i]).find('a').text().trim();
-            } else if (!jockey && i > 3 && $(cells[i]).find('a').length > 0) {
-              jockey = $(cells[i]).find('a').text().trim();
-            }
-          }
-          
-          // 有効なデータがあれば結果に追加（最低限、馬名か馬番があれば）
-          if ((order || frameNumber || horseNumber) && (horseName || horseNumber)) {
-            results.push({
-              order: /^\d+$/.test(order) ? parseInt(order, 10) : 0,
-              frameNumber: parseInt(frameNumber, 10) || 0,
-              horseNumber: parseInt(horseNumber, 10) || 0,
-              horseName: cleanJapaneseText(horseName || '不明'),
-              jockey: cleanJapaneseText(jockey || '不明')
-            });
-          }
-        } catch (rowError) {
-          logger.error(`NAR: 着順情報の行処理でエラー: ${rowError}`);
+          });
         }
-      });
+      }
       
       logger.debug(`レース ${raceId} の着順情報: ${results.length}件`);
       
