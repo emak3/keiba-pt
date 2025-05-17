@@ -8,50 +8,14 @@ import iconv from 'iconv-lite';
 import { v4 as uuidv4 } from 'uuid';
 import { saveJraRace, saveNarRace } from '../database/raceService.js';
 
-/**
- * レスポンスの文字セットを検出 (強化版)
- * @param {Object} response - Axiosレスポンス
- * @returns {string} 文字セット名
- */
-function detectCharset(response) {
-    // HTTP헤더で宣言されたCharsetを確認
-    const contentType = response.headers['content-type'] || '';
-    const charsetMatch = contentType.match(/charset=([^;]+)/i);
-
-    if (charsetMatch) {
-        const charset = charsetMatch[1].trim().toLowerCase();
-        logger.debug(`Content-Typeヘッダーから文字セット検出: ${charset}`);
-        return charset;
-    }
-
-    try {
-        // metaタグで宣言されたcharsetを検出（UTF-8でまず試してみる）
-        const utf8Sample = iconv.decode(Buffer.from(response.data), 'utf-8');
-        const metaCharsetMatch = utf8Sample.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
-
-        if (metaCharsetMatch) {
-            const charset = metaCharsetMatch[1].trim().toLowerCase();
-            logger.debug(`metaタグから文字セット検出: ${charset}`);
-            return charset;
-        }
-
-        // EUC-JPで試してみる
-        const eucJpSample = iconv.decode(Buffer.from(response.data), 'euc-jp');
-        const eucMetaCharsetMatch = eucJpSample.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
-
-        if (eucMetaCharsetMatch) {
-            const charset = eucMetaCharsetMatch[1].trim().toLowerCase();
-            logger.debug(`EUC-JP解釈からmeta文字セット検出: ${charset}`);
-            return charset;
-        }
-    } catch (error) {
-        logger.debug(`metaタグからの文字セット検出に失敗: ${error}`);
-    }
-
-    // netkeiba.comはEUC-JPを使っていることが多い
-    logger.debug(`文字セットが検出できませんでした。netkeiba.comのため、EUC-JPを使用します。`);
-    return 'euc-jp';
-}
+// 文字エンコーディング関連の関数をインポート
+import { 
+    detectCharset, 
+    validateRaceName, 
+    validateVenueName, 
+    cleanJapaneseText, 
+    recommendedAxiosConfig 
+} from '../../utils/textCleaner.js';
 
 /**
  * 強化版スクレイピング処理
@@ -68,21 +32,18 @@ async function fetchAndParse(url, debugFilename = null) {
   
   while (retryCount < maxRetries) {
     try {
-      // リクエスト設定をシンプル化
-      const config = {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Accept-Charset': 'utf-8, euc-jp, shift_jis'
-        },
-        responseType: 'arraybuffer'
-      };
+      // リクエスト設定を適用
+      const config = recommendedAxiosConfig;
       
       // リクエスト実行
       const response = await axios.get(url, config);
       
-      // 直接EUC-JPでデコード
-      const html = iconv.decode(Buffer.from(response.data), 'EUC-JP');
+      // 文字コードを検出
+      const charset = detectCharset(response);
+      logger.debug(`検出された文字コード: ${charset}`);
+      
+      // 指定された文字コードでデコード
+      const html = iconv.decode(Buffer.from(response.data), charset);
       
       // デバッグ用にファイル保存
       if (debugFilename) {
@@ -191,12 +152,16 @@ export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()
                         logger.warn(`レース名が文字化けしている可能性: ${raceName}`);
                     }
 
+                    // 検証済みの競馬場名とレース名を使用
+                    const validatedVenue = validateVenueName(venueName);
+                    const validatedRaceName = validateRaceName(raceName, validatedVenue, parseInt(raceNumber, 10));
+
                     races.push({
                         id: raceId,
                         type: 'jra',
-                        venue: venueName,
+                        venue: validatedVenue,
                         number: parseInt(raceNumber, 10) || raceIndex + 1,
-                        name: raceName,
+                        name: validatedRaceName,
                         time: raceTime,
                         date: dateString,
                         status: 'upcoming',
@@ -284,12 +249,16 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
                         logger.warn(`レース名が文字化けしている可能性: ${raceName}`);
                     }
 
+                    // 検証済みの競馬場名とレース名を使用
+                    const validatedVenue = validateVenueName(venueName);
+                    const validatedRaceName = validateRaceName(raceName, validatedVenue, parseInt(raceNumber, 10));
+
                     races.push({
                         id: raceId,
                         type: 'nar',
-                        venue: venueName,
+                        venue: validatedVenue,
                         number: parseInt(raceNumber, 10) || raceIndex + 1,
-                        name: raceName,
+                        name: validatedRaceName,
                         time: raceTime,
                         date: dateString,
                         status: 'upcoming',
@@ -313,4 +282,181 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
     }
 }
 
-// その他必要な強化版関数も同様に実装...
+/**
+ * JRAレースの出走馬情報を取得 - 強化版
+ * @param {string} raceId - レースID
+ * @returns {Promise<Array>} 出走馬情報
+ */
+export async function fetchJraHorsesEnhanced(raceId) {
+    try {
+        const url = `https://race.netkeiba.com/race/shutuba.html?race_id=${raceId}`;
+        const debugFilename = `jra_horses_${raceId}_${uuidv4().substring(0, 8)}.html`;
+
+        // 強化版の取得・パース処理
+        const { $ } = await fetchAndParse(url, debugFilename);
+
+        const horses = [];
+
+        // 出走馬テーブルを処理
+        $('.HorseList').each((index, element) => {
+            const frameNumber = $(element).find('.Waku').text().trim();
+            const horseNumber = $(element).find('.Umaban').text().trim();
+            const horseName = $(element).find('.HorseName a').text().trim();
+            const jockey = $(element).find('.Jockey a').text().trim();
+            const trainer = $(element).find('.Trainer a').text().trim();
+            const weight = $(element).find('.Weight').text().trim();
+            const odds = $(element).find('.Popular span').first().text().trim();
+            const popularity = $(element).find('.Popular_Ninki span').text().trim();
+
+            // 馬名の文字化けチェック
+            const hasGarbledName = /[\uFFFD\u30FB\u309A-\u309C]/.test(horseName) ||
+                horseName.includes('��') ||
+                horseName.includes('□') ||
+                horseName.includes('�');
+
+            if (hasGarbledName) {
+                logger.warn(`馬名が文字化けしている可能性: ${horseName}`);
+            }
+
+            // 馬情報を追加
+            horses.push({
+                frameNumber: parseInt(frameNumber, 10) || 0,
+                horseNumber: parseInt(horseNumber, 10) || 0,
+                horseName: cleanJapaneseText(horseName) || `${horseNumber}番馬`,
+                jockey: cleanJapaneseText(jockey) || '騎手不明',
+                trainer: cleanJapaneseText(trainer) || '調教師不明',
+                weight: weight || '',
+                odds: parseFloat(odds) || 0,
+                popularity: parseInt(popularity, 10) || 0
+            });
+        });
+
+        logger.info(`JRA: レース ${raceId} の出走馬情報 ${horses.length} 件を取得しました。`);
+        return horses;
+    } catch (error) {
+        logger.error(`JRA出走馬情報取得中にエラー: ${error}`);
+        throw error;
+    }
+}
+
+/**
+ * NARレースの出走馬情報を取得 - 強化版
+ * @param {string} raceId - レースID
+ * @returns {Promise<Array>} 出走馬情報
+ */
+export async function fetchNarHorsesEnhanced(raceId) {
+    try {
+        const url = `https://nar.netkeiba.com/race/shutuba.html?race_id=${raceId}`;
+        const debugFilename = `nar_horses_${raceId}_${uuidv4().substring(0, 8)}.html`;
+
+        // 強化版の取得・パース処理
+        const { $ } = await fetchAndParse(url, debugFilename);
+
+        const horses = [];
+
+        // 出走馬テーブルを処理（複数のセレクタパターンを試行）
+        const horseRowSelectors = [
+            '.HorseList',
+            '.Shutuba_Table tr:not(:first-child)',
+            '.RaceTableArea tr:not(:first-child)'
+        ];
+        
+        let horseRows = [];
+        
+        // いずれかのセレクタで馬情報を取得
+        for (const selector of horseRowSelectors) {
+            const rows = $(selector);
+            if (rows.length > 0) {
+                horseRows = rows;
+                break;
+            }
+        }
+        
+        // 各行を処理
+        horseRows.each((index, element) => {
+            // 枠番と馬番の複数セレクタを試行
+            const frameSelectors = ['.Waku', '.Waku1', '.Waku2', '.Waku3', '.Waku4', '.Waku5', '.Waku6', '.Waku7', '.Waku8', 'td:nth-child(1)'];
+            const horseNumSelectors = ['.Umaban', '.Umaban1', '.Umaban2', '.Umaban3', '.Umaban4', '.Umaban5', '.Umaban6', '.Umaban7', '.Umaban8', 'td:nth-child(2)'];
+            
+            let frameNumber = '';
+            let horseNumber = '';
+            
+            // 枠番の抽出
+            for (const selector of frameSelectors) {
+                const cell = $(element).find(selector);
+                if (cell.length > 0) {
+                    frameNumber = cell.text().trim().replace(/\D/g, '');
+                    if (frameNumber) break;
+                }
+            }
+            
+            // 馬番の抽出
+            for (const selector of horseNumSelectors) {
+                const cell = $(element).find(selector);
+                if (cell.length > 0) {
+                    horseNumber = cell.text().trim().replace(/\D/g, '');
+                    if (horseNumber) break;
+                }
+            }
+            
+            // 馬名、騎手、調教師の抽出
+            const horseName = $(element).find('.HorseName a, td:nth-child(4) a').first().text().trim();
+            const jockey = $(element).find('.Jockey a, td:nth-child(7) a').first().text().trim();
+            const trainer = $(element).find('.Trainer a, td:nth-child(9) a').first().text().trim();
+            const weight = $(element).find('.Weight, td:nth-child(12)').first().text().trim();
+            
+            // オッズと人気の抽出
+            let odds = '';
+            let popularity = '';
+            
+            const oddsSelectors = ['.Popular.Txt_R', '.Odds', 'td:nth-child(10)'];
+            const popularitySelectors = ['.Popular.Txt_C span', '.Popular span', 'td:nth-child(11)'];
+            
+            for (const selector of oddsSelectors) {
+                const cell = $(element).find(selector);
+                if (cell.length > 0) {
+                    odds = cell.text().trim().replace(/[^\d\.]/g, '');
+                    if (odds) break;
+                }
+            }
+            
+            for (const selector of popularitySelectors) {
+                const cell = $(element).find(selector);
+                if (cell.length > 0) {
+                    popularity = cell.text().trim().replace(/\D/g, '');
+                    if (popularity) break;
+                }
+            }
+
+            // 馬名の文字化けチェック
+            const hasGarbledName = /[\uFFFD\u30FB\u309A-\u309C]/.test(horseName) ||
+                horseName.includes('��') ||
+                horseName.includes('□') ||
+                horseName.includes('�');
+
+            if (hasGarbledName) {
+                logger.warn(`馬名が文字化けしている可能性: ${horseName}`);
+            }
+
+            // 馬情報の追加（必須項目があれば）
+            if (horseName && (horseNumber || frameNumber)) {
+                horses.push({
+                    frameNumber: parseInt(frameNumber, 10) || 0,
+                    horseNumber: parseInt(horseNumber, 10) || 0,
+                    horseName: cleanJapaneseText(horseName) || `${horseNumber}番馬`,
+                    jockey: cleanJapaneseText(jockey) || '騎手不明',
+                    trainer: cleanJapaneseText(trainer) || '調教師不明',
+                    weight: weight || '',
+                    odds: parseFloat(odds) || 0,
+                    popularity: parseInt(popularity, 10) || 0
+                });
+            }
+        });
+
+        logger.info(`NAR: レース ${raceId} の出走馬情報 ${horses.length} 件を取得しました。`);
+        return horses;
+    } catch (error) {
+        logger.error(`NAR出走馬情報取得中にエラー: ${error}`);
+        throw error;
+    }
+}

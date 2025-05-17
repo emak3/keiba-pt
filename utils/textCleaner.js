@@ -1,5 +1,5 @@
 /**
- * 文字列のバリデーションチェック
+ * 文字列のバリデーションチェック - 強化版
  * @param {string} text - チェックする文字列
  * @returns {boolean} 有効な文字列かどうか
  */
@@ -7,7 +7,12 @@ export function isValidJapaneseText(text) {
   if (!text) return false;
   
   // 明らかに文字化けしている場合はfalseを返す
-  if (/[\uFFFD\u30FB\u309A-\u309C]/.test(text) && text.length > 3) {
+  if (/[\uFFFD\u30FB\u309A-\u309C]/.test(text)) {
+    return false;
+  }
+
+  // 特定の文字化けパターンをチェック
+  if (text.includes('��') || text.includes('�') || text.includes('□')) {
     return false;
   }
   
@@ -15,13 +20,18 @@ export function isValidJapaneseText(text) {
 }
 
 /**
- * 後方互換性のための関数 - 既存のコードがまだこの関数を使用している場合のため
+ * 日本語テキストのクリーニング - 強化版
+ * @param {string} text - クリーニングする文字列
+ * @returns {string} クリーニングされた文字列
  */
 export function cleanJapaneseText(text) {
   if (!text) return '';
   
   // 明らかに文字化けしている場合は空文字を返す
-  if (/[\uFFFD\u30FB\u309A-\u309C]/.test(text) && text.length > 3) {
+  if (/[\uFFFD\u30FB\u309A-\u309C]/.test(text) || 
+      text.includes('��') || 
+      text.includes('�') ||
+      text.includes('□')) {
     return '';
   }
   
@@ -33,8 +43,8 @@ export function cleanJapaneseText(text) {
              .replace(/&#39;/g, "'")
              .replace(/&nbsp;/g, ' ');
   
-  // 文字化けした記号などを除去
-  text = text.replace(/[^\p{L}\p{N}\p{P}\p{Z}\p{Emoji}]/gu, '');
+  // 不要な制御文字や特殊文字を除去
+  text = text.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
   
   // 連続する空白を1つに
   text = text.replace(/\s+/g, ' ').trim();
@@ -43,27 +53,20 @@ export function cleanJapaneseText(text) {
 }
 
 /**
- * レース名のシンプルな検証
+ * レース名のシンプルな検証と代替テキスト生成
  * @param {string} raceName - レース名
  * @param {string} venue - 開催場所
  * @param {number} number - レース番号
  * @returns {string} 検証済みのレース名または代替テキスト
  */
 export function validateRaceName(raceName, venue, number) {
-  // 無効な場合のみ代替テキストを提供し、有効な場合は元のレース名を使用
+  // 無効な場合は代替テキストを提供
   if (!isValidJapaneseText(raceName) || !raceName || raceName.length < 2) {
-    // 元のレース名を保持しようとする
-    return `${venue} ${number}R`;
+    // 標準的なレース名パターンを生成
+    return `${venue || '不明'} ${number || '?'}R`;
   }
   
   return raceName;
-}
-
-/**
- * 後方互換性のための関数 - 既存のコードがまだこの関数を使用している場合のため
- */
-export function cleanRaceName(raceName, venue, number) {
-  return validateRaceName(raceName, venue, number);
 }
 
 /**
@@ -74,27 +77,65 @@ export function cleanRaceName(raceName, venue, number) {
 export function validateVenueName(venue) {
   // 無効な場合は未知として扱う
   if (!isValidJapaneseText(venue) || !venue || venue.length < 2) {
-    return '不明';
+    return '不明競馬場';
   }
   
   return venue;
 }
 
 /**
- * 後方互換性のための関数 - 既存のコードがまだこの関数を使用している場合のため
+ * 後方互換性のための関数
+ */
+export function cleanRaceName(raceName, venue, number) {
+  return validateRaceName(raceName, venue, number);
+}
+
+/**
+ * 後方互換性のための関数
  */
 export function cleanVenueName(venue) {
   return validateVenueName(venue);
 }
 
 /**
- * レスポンスの文字セットを検出
+ * レスポンスの文字セットを検出 - 強化版
  * @param {Object} response - Axiosレスポンス
  * @returns {string} 文字セット名
  */
 export function detectCharset(response) {
-  // ネットケイバは基本的にEUC-JPを使用
-  return 'euc-jp';
+    // HTTP헤더で宣言されたCharsetを確認
+    const contentType = response.headers['content-type'] || '';
+    const charsetMatch = contentType.match(/charset=([^;]+)/i);
+
+    if (charsetMatch) {
+        const charset = charsetMatch[1].trim().toLowerCase();
+        return charset;
+    }
+
+    try {
+        // metaタグで宣言されたcharsetを検出（UTF-8でまず試してみる）
+        const utf8Sample = Buffer.from(response.data).toString('utf8', 0, 1000);
+        const metaCharsetMatch = utf8Sample.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
+
+        if (metaCharsetMatch) {
+            const charset = metaCharsetMatch[1].trim().toLowerCase();
+            return charset;
+        }
+
+        // EUC-JPで試してみる
+        const eucJpSample = Buffer.from(response.data).toString('binary', 0, 1000);
+        const eucMetaCharsetMatch = eucJpSample.match(/<meta[^>]*charset=["']?([^"'>]+)/i);
+
+        if (eucMetaCharsetMatch) {
+            const charset = eucMetaCharsetMatch[1].trim().toLowerCase();
+            return charset;
+        }
+    } catch (error) {
+        // エラーが発生した場合は無視
+    }
+
+    // netkeiba.comはEUC-JPを使っていることが多い
+    return 'euc-jp';
 }
 
 // スクレイパー用の推奨設定

@@ -3,11 +3,23 @@
 
 import { CronJob } from 'cron';
 import dayjs from 'dayjs';
-import { fetchJraRaceListEnhanced, fetchNarRaceListEnhanced } from '../scraper/enhancedScraper.js';
+import { 
+  fetchJraRaceListEnhanced, 
+  fetchNarRaceListEnhanced,
+  fetchJraHorsesEnhanced,
+  fetchNarHorsesEnhanced
+} from '../scraper/enhancedScraper.js';
 // 既存のスクレイパーを正しくインポート
 import { fetchJraRaceResults } from '../scraper/jraScraper.js';
 import { fetchNarRaceResults } from '../scraper/narScraper.js';
-import { getActiveRaces, saveJraRace, saveNarRace, updateJraRaceResult, updateNarRaceResult } from '../database/raceService.js';
+import { 
+  getActiveRaces, 
+  saveJraRace, 
+  saveNarRace, 
+  updateJraRaceResult, 
+  updateNarRaceResult,
+  getRaceById
+} from '../database/raceService.js';
 import logger from '../../utils/logger.js';
 
 let client = null;
@@ -30,9 +42,14 @@ export function startEnhancedRaceScheduler(discordClient) {
   // 定期的にデータをリフレッシュ（特に文字化け対策として）- 1時間ごと
   new CronJob('0 0 */1 * * *', refreshRaceData, null, true, 'Asia/Tokyo');
   
+  // 定期的に出走馬情報を更新 - 3時間ごと
+  new CronJob('0 0 */3 * * *', updateHorsesInfo, null, true, 'Asia/Tokyo');
+  
   // 起動時に1回実行
   fetchDailyRaces();
   checkRaceResults();
+  // 5分後に出走馬情報を更新
+  setTimeout(updateHorsesInfo, 5 * 60 * 1000);
 }
 
 /**
@@ -89,6 +106,9 @@ async function fetchDailyRaces() {
     
     const totalRaces = jraRaces.length + narRaces.length;
     logger.info(`本日のレース取得が完了しました。JRA: ${jraRaces.length}件, NAR: ${narRaces.length}件, 合計: ${totalRaces}件`);
+    
+    // 出走馬情報の取得も実行
+    await updateHorsesInfo();
     
     // Discordに通知（オプション）
     if (client) {
@@ -231,5 +251,78 @@ async function refreshRaceData() {
     logger.info(`レースデータリフレッシュが完了しました。JRA: ${jraRaces.length}件, NAR: ${narRaces.length}件`);
   } catch (error) {
     logger.error(`レースデータリフレッシュ中にエラーが発生しました: ${error}`);
+  }
+}
+
+/**
+ * 出走馬情報の更新
+ */
+async function updateHorsesInfo() {
+  try {
+    const today = dayjs().format('YYYYMMDD');
+    logger.info(`出走馬情報の更新を開始します (${today})`);
+    
+    // 開催中のレースを取得
+    const activeRaces = await getActiveRaces();
+    
+    if (activeRaces.length === 0) {
+      logger.info('出走馬情報を更新するレースがありません。');
+      return;
+    }
+    
+    logger.info(`出走馬情報を更新するレース: ${activeRaces.length}件`);
+    
+    // 各レースの出走馬情報を更新
+    let jraUpdateCount = 0;
+    let narUpdateCount = 0;
+    
+    for (const race of activeRaces) {
+      try {
+        // レース情報を取得
+        const raceData = await getRaceById(race.id);
+        
+        // すでに終了したレースはスキップ
+        if (raceData && raceData.status === 'completed') {
+          continue;
+        }
+        
+        // レース種別に応じた出走馬情報の取得
+        let horses = [];
+        
+        if (race.type === 'jra') {
+          horses = await fetchJraHorsesEnhanced(race.id);
+          if (horses && horses.length > 0) {
+            // レース情報を更新
+            await saveJraRace({
+              ...race,
+              horses
+            });
+            jraUpdateCount++;
+          }
+        } else if (race.type === 'nar') {
+          horses = await fetchNarHorsesEnhanced(race.id);
+          if (horses && horses.length > 0) {
+            // レース情報を更新
+            await saveNarRace({
+              ...race,
+              horses
+            });
+            narUpdateCount++;
+          }
+        }
+        
+        logger.debug(`レース ${race.id} の出走馬情報を更新しました: ${horses.length}頭`);
+        
+        // 短い待機を入れて連続リクエストを避ける
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (raceError) {
+        logger.error(`レース ${race.id} の出走馬情報更新中にエラーが発生しました: ${raceError}`);
+        // エラーが発生しても次のレースの処理を続行
+      }
+    }
+    
+    logger.info(`出走馬情報の更新が完了しました。JRA: ${jraUpdateCount}件, NAR: ${narUpdateCount}件`);
+  } catch (error) {
+    logger.error(`出走馬情報更新中にエラーが発生しました: ${error}`);
   }
 }

@@ -7,7 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { initializeFirebase } from './config/firebase-config.js';
-// 強化版スケジューラーのインポート
+// 強化版スケジューラーを使用
 import { startEnhancedRaceScheduler } from './services/scheduler/enhancedRaceScheduler.js';
 import logger from './utils/logger.js';
 
@@ -82,8 +82,10 @@ async function registerCommands() {
 client.once(Events.ClientReady, () => {
   logger.info(`${client.user.tag} として準備完了！`);
   
-  // 強化版レーススケジューラーの開始 - 文字コード問題対応
+  // 強化版レーススケジューラーの開始
+  // 文字エンコーディング修正版を使用する
   startEnhancedRaceScheduler(client);
+  logger.info('強化版スケジューラー（文字エンコーディング修正対応）を開始しました。');
 });
 
 // インタラクション（スラッシュコマンド）の処理
