@@ -1,4 +1,4 @@
-// 修正バージョン - TypeScriptエラー解決済み
+// services/scraper/enhancedScraper.js の修正版
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
@@ -157,7 +157,7 @@ function getVenueNameFromCode(venueCode) {
         '61': '中京(地方)',
         '65': '帯広(ば)'
     };
-    
+
     return venueMap[venueCode] || '不明競馬場';
 }
 
@@ -288,7 +288,7 @@ export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()
                     const venueCode = extractVenueCodeFromRaceId(raceId);
                     const detectedType = determineRaceTypeFromVenueCode(venueCode);
                     const detectedVenueName = getVenueNameFromCode(venueCode);
-                    
+
                     // タイプ不一致の警告
                     if (detectedType !== 'jra') {
                         logger.warn(`JRAページから取得したレースIDがJRCではない可能性: ${raceId} (タイプ:${detectedType}, 会場:${detectedVenueName})`);
@@ -307,7 +307,7 @@ export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()
 
                     // 検証済みのレース名を使用
                     let validatedRaceName = validateRaceName(raceName, venueName, parseInt(raceNumber, 10));
-                    
+
                     // 会場名を検証 - レースIDから会場名を取得して補足
                     let finalVenueName = venueName;
                     if (detectedVenueName && detectedVenueName !== '不明競馬場') {
@@ -406,7 +406,7 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
                     const venueCode = extractVenueCodeFromRaceId(raceId);
                     const detectedType = determineRaceTypeFromVenueCode(venueCode);
                     const detectedVenueName = getVenueNameFromCode(venueCode);
-                    
+
                     // タイプ不一致の警告
                     if (detectedType !== 'nar') {
                         logger.warn(`NARページから取得したレースIDがNARではない可能性: ${raceId} (タイプ:${detectedType}, 会場:${detectedVenueName})`);
@@ -425,7 +425,7 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
 
                     // 検証済みのレース名を使用
                     let validatedRaceName = validateRaceName(raceName, venueName, parseInt(raceNumber, 10));
-                    
+
                     // 会場名を検証 - レースIDから会場名を取得して補足
                     let finalVenueName = venueName;
                     if (detectedVenueName && detectedVenueName !== '不明競馬場') {
@@ -473,19 +473,19 @@ async function verifyRaceInformation(raceId) {
     try {
         // データベースからレース情報を取得
         const savedRace = await getRaceById(raceId);
-        
+
         // レースIDから会場コードを取得
         const venueCode = extractVenueCodeFromRaceId(raceId);
         const detectedType = determineRaceTypeFromVenueCode(venueCode);
         const detectedVenueName = getVenueNameFromCode(venueCode);
-        
+
         // 保存されたレース情報がない場合は新規作成
         if (!savedRace) {
             logger.warn(`レースID ${raceId} の情報がデータベースにありません。新規に作成します。`);
-            
+
             // 現在の日付から推測
             const today = dayjs().format('YYYYMMDD');
-            
+
             return {
                 id: raceId,
                 type: detectedType,
@@ -499,24 +499,24 @@ async function verifyRaceInformation(raceId) {
                 venueCode: venueCode
             };
         }
-        
+
         // 既存のレース情報の会場情報を検証
         if (savedRace.venue !== detectedVenueName && detectedVenueName !== '不明競馬場') {
             logger.warn(`レースID ${raceId} の会場情報の不一致: DB=${savedRace.venue}, 検出=${detectedVenueName}`);
             // レースIDから取得した会場名を優先
             savedRace.venue = detectedVenueName;
         }
-        
+
         // レースタイプを検証
         if (savedRace.type !== detectedType) {
             logger.warn(`レースID ${raceId} のタイプ情報の不一致: DB=${savedRace.type}, 検出=${detectedType}`);
             // レースIDから取得したタイプを優先
             savedRace.type = detectedType;
         }
-        
+
         // 会場コードを追加
         savedRace.venueCode = venueCode;
-        
+
         return savedRace;
     } catch (error) {
         logger.error(`レース情報検証中にエラー: ${error}`);
@@ -525,7 +525,41 @@ async function verifyRaceInformation(raceId) {
 }
 
 /**
- * JRAレースの出走馬情報を取得 - HTML構造に最適化版
+ * オッズ文字列を正しく解析する関数
+ * @param {string} oddsText - オッズのテキスト表現
+ * @returns {number} 正規化されたオッズ値
+ */
+function parseOddsValue(oddsText) {
+    // 空やnullの場合は0を返す
+    if (!oddsText) return 0;
+
+    // 数値以外の文字を取り除く（小数点は保持）
+    const cleanedText = oddsText.replace(/[^\d\.]/g, '');
+
+    // 変換できない場合は0を返す
+    if (!cleanedText) return 0;
+
+    // 小数点を含む場合はそのまま変換
+    if (cleanedText.includes('.')) {
+        return parseFloat(cleanedText) || 0;
+    }
+
+    // 小数点がないが、2桁以上の場合は100で割る（4600 → 46.0）
+    if (cleanedText.length >= 2) {
+        // テキストが全て数字で、値が100以上の場合は100で割る
+        const value = parseInt(cleanedText, 10);
+        if (value >= 100) {
+            return value / 100;
+        }
+    }
+
+    // それ以外はそのまま浮動小数点で返す
+    return parseFloat(cleanedText) || 0;
+}
+
+
+/**
+ * JRAレースの出走馬情報を取得 - オッズ抽出を強化したバージョン
  * @param {string} raceId - レースID
  * @returns {Promise<Array>} 出走馬情報
  */
@@ -534,336 +568,330 @@ export async function fetchJraHorsesEnhanced(raceId) {
         // まずレース情報を検証
         const verifiedRace = await verifyRaceInformation(raceId);
         
-        // レースタイプがJRAでなければ警告
-        if (verifiedRace.type !== 'jra') {
-            logger.warn(`レースID ${raceId} はJRA形式ではありませんが、JRA出走馬取得を試みます。`);
-        }
-        
+        // URLを構築
         const url = `https://race.netkeiba.com/race/shutuba.html?race_id=${raceId}`;
         const debugFilename = `jra_horses_${raceId}_${uuidv4().substring(0, 8)}.html`;
 
-        // 強化版の取得・パース処理
-        const { $ } = await fetchAndParse(url, debugFilename);
+        // シンプルなHTTP リクエスト設定
+        const config = {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7'
+            },
+            responseType: 'arraybuffer'
+        };
 
-        const horses = [];
-
-        // デバッグ: 最初の行の構造を出力
-        let firstRow = $('tr.HorseList').first();
-        logger.debug("=== JRA 最初の行の構造 ===");
-        $(firstRow).find('td').each((i, td) => {
-            logger.debug(`td[${i}] class="${$(td).attr('class')}" text="${$(td).text().trim()}"`);
-        });
-
-        // オッズカラムとninkiカラムの出力
-        const oddsColumn = $(firstRow).find('td.Popular, td.Txt_R');
-        if (oddsColumn.length > 0) {
-            logger.debug(`JRA オッズカラム: class="${oddsColumn.attr('class')}" text="${oddsColumn.text().trim()}"`);
-            oddsColumn.find('span').each((i, span) => {
-                logger.debug(`  span[${i}] id="${$(span).attr('id')}" class="${$(span).attr('class')}" text="${$(span).text().trim()}"`);
-            });
+        // 直接axiosでHTMLを取得
+        logger.info(`データを取得中: ${url}`);
+        const response = await axios.get(url, config);
+        
+        // EUC-JPでデコード（ネットケイバは基本的にEUC-JP）
+        const html = iconv.decode(Buffer.from(response.data), 'euc-jp');
+        
+        // デバッグ用にHTMLを保存
+        const debugDir = path.join(process.cwd(), 'debug');
+        if (!fs.existsSync(debugDir)) {
+            fs.mkdirSync(debugDir);
         }
-
-        // 出走馬テーブルを処理 - 行単位で処理
-        $('tr.HorseList').each((index, element) => {
+        fs.writeFileSync(path.join(debugDir, debugFilename), html, 'utf-8');
+        
+        // オッズ情報をHTMLから探索（JavaScriptデータを探す）
+        const oddsRegex = /odds\[[^\]]*\]\s*=\s*"([^"]+)"/g;
+        const popRegex = /ninki\[[^\]]*\]\s*=\s*"([^"]+)"/g;
+        
+        let oddsMatches = [];
+        let popMatches = [];
+        let match;
+        
+        // オッズ情報を抽出
+        while ((match = oddsRegex.exec(html)) !== null) {
+            oddsMatches.push(match[1]);
+        }
+        
+        // 人気順情報を抽出
+        while ((match = popRegex.exec(html)) !== null) {
+            popMatches.push(match[1]);
+        }
+        
+        logger.debug(`JavaScriptから抽出: オッズデータ ${oddsMatches.length}件, 人気順データ ${popMatches.length}件`);
+        
+        // cheerioでHTMLをパース
+        const $ = cheerio.load(html, {
+            decodeEntities: false // HTML実体参照をデコードしない
+        });
+        
+        // オッズ値を解析する補助関数
+        function parseOddsValue(text) {
+            if (!text) return 0;
+            text = text.trim();
+            
+            // "---.-" や "0" などの特殊値は0として扱う
+            if (text === '---.-' || text === '--' || text === '**' || text === '0') {
+                return 0;
+            }
+            
+            // カンマを削除して数値に変換
+            const cleanText = text.replace(/,/g, '');
+            const match = cleanText.match(/(\d+(?:\.\d+)?)/);
+            if (match) {
+                return parseFloat(match[1]);
+            }
+            
+            return 0;
+        }
+        
+        // 人気順を解析する補助関数
+        function parsePopularityValue(text) {
+            if (!text) return 0;
+            text = text.trim();
+            
+            // "**" や "-" などの特殊値は0として扱う
+            if (text === '**' || text === '-' || text === '--') {
+                return 0;
+            }
+            
+            // 数値のみを抽出
+            const match = text.match(/(\d+)/);
+            if (match) {
+                return parseInt(match[1], 10);
+            }
+            
+            return 0;
+        }
+        
+        // 出走馬情報の配列
+        const horses = [];
+        
+        // 出走馬テーブルの行を処理
+        $('tr.HorseList').each((index, row) => {
             try {
-                // 馬番 - HTML構造に基づいて正確に取得
-                let horseNumber = '';
-                const umabanSelectors = [
-                    'td.Umaban', 
-                    'td.Umaban1', 
-                    'td.Umaban2', 
-                    'td:nth-child(2)',
-                    'td:nth-child(3)'
-                ];
-                
-                for (const selector of umabanSelectors) {
-                    const cell = $(element).find(selector);
-                    if (cell.length > 0) {
-                        const text = cell.text().trim().replace(/\D/g, '');
-                        if (text) {
-                            horseNumber = text;
-                            break;
-                        }
-                    }
+                // 直接HTMLを出力（最初の数行だけ）
+                if (index < 3) {
+                    const rowHtml = $(row).html();
+                    logger.debug(`行[${index+1}]の生HTML: ${rowHtml.substring(0, 300)}...`);
                 }
-
-                // 枠番 - HTML構造に基づいて正確に取得
-                let frameNumber = '';
-                const wakuSelectors = [
-                    'td.Waku', 
-                    'td.Waku1', 
-                    'td.Waku2', 
-                    'td:first-child',
-                    'td:nth-child(1)'
-                ];
                 
-                for (const selector of wakuSelectors) {
-                    const cell = $(element).find(selector);
-                    if (cell.length > 0) {
-                        let text = '';
-                        // まずspanの中を探す
-                        const span = cell.find('span').first();
-                        if (span.length > 0) {
-                            text = span.text().trim().replace(/\D/g, '');
-                        }
-                        
-                        // spanが見つからないか空の場合はセル自体のテキストを使用
-                        if (!text) {
-                            text = cell.text().trim().replace(/\D/g, '');
-                        }
-                        
-                        if (text) {
-                            frameNumber = text;
-                            break;
-                        }
-                    }
-                }
-
-                // 馬名 - 複数のセレクタパターンで試行
-                let horseName = '';
-                const horseNameSelectors = [
-                    '.HorseName a', 
-                    'td:nth-child(4) a',
-                    'a[target="_blank"][title]',
-                    'a[href*="horse"]'
-                ];
+                // 基本情報の取得（クラス名で明確に特定）
+                const frameCell = $(row).find('td[class^="Waku"]').first();
+                const horseNumCell = $(row).find('td[class^="Umaban"]').first();
+                const horseNameLink = $(row).find('.HorseName a').first();
+                const jockeyLink = $(row).find('.Jockey a').first();
+                const trainerLink = $(row).find('.Trainer a').first();
+                const weightCell = $(row).find('.Weight').first();
                 
-                for (const selector of horseNameSelectors) {
-                    const nameElem = $(element).find(selector);
-                    if (nameElem.length > 0) {
-                        const text = nameElem.text().trim();
-                        if (text) {
-                            horseName = text;
-                            break;
-                        }
-                    }
-                }
-
-                // 騎手名 - 複数のセレクタパターンで試行
-                let jockey = '';
-                const jockeySelectors = [
-                    '.Jockey a', 
-                    'td:nth-child(6) a',
-                    'td:nth-child(7) a',
-                    'a[href*="jockey"]'
-                ];
+                // セルから直接テキストを抽出（最小限の処理）
+                const frameNumber = frameCell.text().trim().replace(/\D/g, '');
+                const horseNumber = horseNumCell.text().trim().replace(/\D/g, '');
+                const horseName = horseNameLink.text().trim();
+                const jockey = jockeyLink.text().trim();
+                const trainer = trainerLink.text().trim();
+                const weight = weightCell.text().trim();
                 
-                for (const selector of jockeySelectors) {
-                    const jockeyElem = $(element).find(selector);
-                    if (jockeyElem.length > 0) {
-                        const text = jockeyElem.text().trim();
-                        if (text) {
-                            jockey = text;
-                            break;
-                        }
-                    }
-                }
-
-                // 調教師名 - 複数のセレクタパターンで試行
-                let trainer = '';
-                const trainerSelectors = [
-                    '.Trainer a', 
-                    'td:nth-child(8) a',
-                    'td:nth-child(9) a',
-                    'a[href*="trainer"]'
-                ];
-                
-                for (const selector of trainerSelectors) {
-                    const trainerElem = $(element).find(selector);
-                    if (trainerElem.length > 0) {
-                        const text = trainerElem.text().trim();
-                        if (text) {
-                            trainer = text;
-                            break;
-                        }
-                    }
-                }
-
-                // 馬体重 - 複数のセレクタパターンで試行
-                let weight = '';
-                const weightSelectors = [
-                    '.Weight', 
-                    'td:nth-child(9)',
-                    'td:nth-child(10)'
-                ];
-                
-                for (const selector of weightSelectors) {
-                    const weightElem = $(element).find(selector);
-                    if (weightElem.length > 0) {
-                        const text = weightElem.text().trim();
-                        if (text) {
-                            weight = text;
-                            break;
-                        }
-                    }
-                }
-
-                // オッズ - JRA固有の構造から慎重に取得
+                // ===== オッズ取得 - 強化版 =====
                 let odds = 0;
+                let rawOddsText = '';
                 
-                // 方法1: oddsのID属性を持つspanから取得
-                const oddsSpans = $(element).find('span[id^="odds-"]');
-                if (oddsSpans.length > 0) {
-                    const oddsText = oddsSpans.first().text().trim();
-                    if (oddsText && oddsText !== '---.-') {
-                        odds = parseFloat(oddsText) || 0;
+                // 方法1: span[id^="odds-"] を探す（基本パターン）
+                const oddsSpan = $(row).find('span[id^="odds-"]');
+                if (oddsSpan.length > 0) {
+                    const oddsText = oddsSpan.text().trim();
+                    rawOddsText = oddsText;
+                    odds = parseOddsValue(oddsText);
+                    logger.debug(`方法1でオッズ取得: id=${oddsSpan.attr('id')}, text=${oddsText}, value=${odds}`);
+                }
+                
+                // 方法2: td.Popular.Txt_R から探す（バックアップ）
+                if (odds === 0) {
+                    const oddsCell = $(row).find('td.Txt_R.Popular, td.Popular.Txt_R');
+                    if (oddsCell.length > 0) {
+                        // span要素があればそこから取得
+                        const span = oddsCell.find('span').first();
+                        if (span.length > 0) {
+                            const spanText = span.text().trim();
+                            rawOddsText = spanText;
+                            odds = parseOddsValue(spanText);
+                        } else {
+                            // span要素がなければセル全体から取得
+                            const cellText = oddsCell.text().trim();
+                            rawOddsText = cellText;
+                            odds = parseOddsValue(cellText);
+                        }
+                        logger.debug(`方法2でオッズ取得: text=${rawOddsText}, value=${odds}`);
                     }
                 }
                 
-                // 方法2: Popular または Txt_R クラスのtdから取得
-                if (odds === 0) {
-                    const popularTd = $(element).find('td.Popular, td.Txt_R, td:nth-child(9)');
-                    if (popularTd.length > 0) {
-                        const oddsText = popularTd.text().trim().replace(/[^\d\.]/g, '');
-                        if (oddsText) {
-                            odds = parseFloat(oddsText) || 0;
-                        }
-                    }
+                // 方法3: オッズ部分を正規表現で探す
+                if (odds === 0 && index < oddsMatches.length) {
+                    rawOddsText = oddsMatches[index];
+                    odds = parseOddsValue(rawOddsText);
+                    logger.debug(`方法3でオッズ取得: JavaScript変数から text=${rawOddsText}, value=${odds}`);
                 }
-
-                // 方法3: より一般的なセレクタで試行
-                if (odds === 0) {
-                    const oddsCells = $(element).find('td:nth-child(9), td:nth-child(10), td:nth-child(11)');
-                    
-                    // ループを使用するが、breakの代わりにフラグを使用
-                    let foundOdds = false;
-                    oddsCells.each((i, cell) => {
-                        if (foundOdds) return; // すでに見つかっている場合はスキップ
-                        
-                        const text = $(cell).text().trim();
-                        // オッズらしき数値を探す（小数点を含む数値）
-                        if (text && /\d+\.\d+/.test(text)) {
-                            const match = text.match(/(\d+\.\d+)/);
-                            if (match) {
-                                odds = parseFloat(match[1]) || 0;
-                                foundOdds = true; // 見つかったらフラグをセット
-                            }
-                        }
-                    });
-                }
-
-                // 人気 - JRA固有の構造から慎重に取得
+                
+                // ===== 人気順取得 - 強化版 =====
                 let popularity = 0;
+                let rawPopText = '';
                 
-                // 方法1: ninkiのID属性を持つspanから取得
-                const ninkiSpans = $(element).find('span[id^="ninki-"]');
-                if (ninkiSpans.length > 0) {
-                    const ninkiText = ninkiSpans.first().text().trim();
-                    if (ninkiText && ninkiText !== '**') {
-                        popularity = parseInt(ninkiText, 10) || 0;
+                // 方法1: span[id^="ninki-"] を探す（基本パターン）
+                const ninkiSpan = $(row).find('span[id^="ninki-"]');
+                if (ninkiSpan.length > 0) {
+                    const ninkiText = ninkiSpan.text().trim();
+                    rawPopText = ninkiText;
+                    popularity = parsePopularityValue(ninkiText);
+                    logger.debug(`方法1で人気順取得: id=${ninkiSpan.attr('id')}, text=${ninkiText}, value=${popularity}`);
+                }
+                
+                // 方法2: td.Popular.Popular_Ninki から探す（バックアップ）
+                if (popularity === 0) {
+                    const ninkiCell = $(row).find('td.Popular_Ninki, td.Popular.Popular_Ninki');
+                    if (ninkiCell.length > 0) {
+                        // span要素があればそこから取得
+                        const span = ninkiCell.find('span').first();
+                        if (span.length > 0) {
+                            const spanText = span.text().trim();
+                            rawPopText = spanText;
+                            popularity = parsePopularityValue(spanText);
+                        } else {
+                            // span要素がなければセル全体から取得
+                            const cellText = ninkiCell.text().trim();
+                            rawPopText = cellText;
+                            popularity = parsePopularityValue(cellText);
+                        }
+                        logger.debug(`方法2で人気順取得: text=${rawPopText}, value=${popularity}`);
                     }
                 }
                 
-                // 方法2: Popular_Ninki または Txt_C クラスのtdから取得
-                if (popularity === 0) {
-                    const ninkiTd = $(element).find('td.Popular_Ninki, td.Txt_C, td:nth-child(10)');
-                    if (ninkiTd.length > 0) {
-                        const spanText = ninkiTd.find('span').text().trim();
-                        const ninkiText = spanText || ninkiTd.text().trim();
-                        if (ninkiText && ninkiText !== '**') {
-                            const match = ninkiText.match(/(\d+)/);
-                            if (match) {
-                                popularity = parseInt(match[1], 10) || 0;
-                            }
-                        }
-                    }
+                // 方法3: 人気順部分を正規表現で探す
+                if (popularity === 0 && index < popMatches.length) {
+                    rawPopText = popMatches[index];
+                    popularity = parsePopularityValue(rawPopText);
+                    logger.debug(`方法3で人気順取得: JavaScript変数から text=${rawPopText}, value=${popularity}`);
                 }
-
-                // 方法3: より一般的なセレクタで試行
-                if (popularity === 0) {
-                    const popCells = $(element).find('td:nth-child(10), td:nth-child(11), td:nth-child(12)');
-                    
-                    // ループを使用するが、breakの代わりにフラグを使用
-                    let foundPopularity = false;
-                    popCells.each((i, cell) => {
-                        if (foundPopularity) return; // すでに見つかっている場合はスキップ
-                        
-                        const text = $(cell).text().trim();
-                        // 人気順はシンプルな1桁か2桁の数字
-                        if (text && /^\d{1,2}$/.test(text)) {
-                            popularity = parseInt(text, 10) || 0;
-                            foundPopularity = true; // 見つかったらフラグをセット
-                        }
-                    });
-                }
-
-                // デバッグログ
-                logger.debug(`JRA 行[${index + 1}]: 馬番=${horseNumber}, 枠番=${frameNumber}, 馬名=${horseName}, オッズ=${odds}, 人気=${popularity}`);
-
-                // データの妥当性チェック
-                if (horseNumber && parseInt(horseNumber, 10) > 0 && parseInt(horseNumber, 10) <= 28) {
-                    // 馬名のバリデーション - 空または不自然な場合はスキップ
-                    if (!horseName || horseName.length < 2 || /^\d+$/.test(horseName)) {
-                        logger.warn(`不正な馬名をスキップ: ${horseName} (馬番: ${horseNumber})`);
-                        return; // continue と同じ効果
-                    }
-                    
+                
+                // 馬番と馬名が有効な場合のみ配列に追加
+                if (horseNumber && horseName) {
                     horses.push({
                         frameNumber: parseInt(frameNumber, 10) || 0,
                         horseNumber: parseInt(horseNumber, 10),
-                        horseName: cleanJapaneseText(horseName) || `${horseNumber}番馬`,
-                        jockey: cleanJapaneseText(jockey) || '不明',
-                        trainer: cleanJapaneseText(trainer) || '不明',
+                        horseName: horseName,
+                        jockey: jockey || '不明',
+                        trainer: trainer || '不明',
                         weight: weight || '',
                         odds: odds,
-                        popularity: popularity
+                        popularity: popularity,
+                        // 生の値も保持（デバッグ用）
+                        oddsRaw: rawOddsText,
+                        ninkiRaw: rawPopText
                     });
-                } else {
-                    logger.warn(`無効な馬番をスキップ: ${horseNumber}`);
                 }
-            } catch (rowError) {
-                logger.error(`JRA 行処理中にエラー: ${rowError}`);
+            } catch (error) {
+                logger.error(`行[${index+1}]の処理中にエラー: ${error}`);
             }
         });
-
-        // 特殊なケース：出走馬情報が見つからなかった場合の代替方法
+        
+        // HorseListが見つからない場合は代替手段を試す
         if (horses.length === 0) {
-            logger.warn(`JRA: 標準的な方法で出走馬情報が取得できませんでした。代替方法を試みます。`);
+            logger.warn(`HorseList行が見つかりませんでした。代替手段を試みます。`);
             
-            // すべての行を詳細にデバッグ
-            debugAllRows($, 'table tr');
-            
-            // 別のテーブル構造を探す
+            // すべてのテーブルから馬情報を探す
             $('table tr').each((index, row) => {
-                // ヘッダー行をスキップ
-                if (index === 0 || $(row).find('th').length > 0) {
-                    return;
-                }
-                
                 try {
-                    // すべてのセルを調査
+                    // ヘッダー行をスキップ
+                    if (index === 0 || $(row).find('th').length > 0) return;
+                    
+                    // セルが少なすぎる行はスキップ
                     const cells = $(row).find('td');
                     if (cells.length < 5) return;
                     
-                    // 各情報を取得
-                    const frameNumber = $(cells[0]).text().trim().replace(/\D/g, '');
-                    const horseNumber = $(cells[1]).text().trim().replace(/\D/g, '');
-                    const horseName = $(cells).find('a[href*="horse"]').text().trim();
-                    const jockey = $(cells).find('a[href*="jockey"]').text().trim();
+                    // 馬情報を抽出
+                    let horseNumber = '';
+                    let frameNumber = '';
+                    let horseName = '';
+                    let jockey = '';
                     
-                    // データの妥当性チェック
-                    if (horseNumber && parseInt(horseNumber, 10) > 0 && parseInt(horseNumber, 10) <= 28 && horseName) {
+                    // 馬番と枠番の候補
+                    const firstCellText = $(cells[0]).text().trim();
+                    const secondCellText = $(cells[1]).text().trim();
+                    
+                    // 馬番と枠番を推測
+                    if (/^\d{1,2}$/.test(secondCellText)) {
+                        horseNumber = secondCellText;
+                        if (/^\d{1}$/.test(firstCellText) && parseInt(firstCellText) < 9) {
+                            frameNumber = firstCellText;
+                        }
+                    }
+                    
+                    // 馬名を探す（リンクから）
+                    const horseLinks = $(row).find('a[href*="horse"]');
+                    if (horseLinks.length > 0) {
+                        horseName = horseLinks.first().text().trim();
+                    }
+                    
+                    // 騎手を探す（リンクから）
+                    const jockeyLinks = $(row).find('a[href*="jockey"]');
+                    if (jockeyLinks.length > 0) {
+                        jockey = jockeyLinks.first().text().trim();
+                    }
+                    
+                    // オッズと人気順を探す
+                    let odds = 0;
+                    let popularity = 0;
+                    let rawOddsText = '';
+                    let rawPopText = '';
+                    
+                    // すべてのセルを調査
+                    cells.each((cellIndex, cell) => {
+                        const cellText = $(cell).text().trim();
+                        
+                        // オッズっぽい値を探す（小数点を含む）
+                        if (/\d+\.\d+/.test(cellText) && !rawOddsText) {
+                            rawOddsText = cellText;
+                            odds = parseOddsValue(cellText);
+                        }
+                        
+                        // 人気順っぽい値を探す（1〜2桁の数字）
+                        if (/^\s*\d{1,2}\s*$/.test(cellText) && parseInt(cellText) > 0 && parseInt(cellText) < 20 && !rawPopText) {
+                            rawPopText = cellText;
+                            popularity = parsePopularityValue(cellText);
+                        }
+                    });
+                    
+                    // 馬番と馬名が有効な場合のみ配列に追加
+                    if (horseNumber && horseName) {
                         horses.push({
                             frameNumber: parseInt(frameNumber, 10) || 0,
                             horseNumber: parseInt(horseNumber, 10),
-                            horseName: cleanJapaneseText(horseName) || `${horseNumber}番馬`,
-                            jockey: cleanJapaneseText(jockey) || '不明',
+                            horseName: horseName,
+                            jockey: jockey || '不明',
                             trainer: '不明',
                             weight: '',
-                            odds: 0,
-                            popularity: 0
+                            odds: odds,
+                            popularity: popularity,
+                            // 生の値も保持（デバッグ用）
+                            oddsRaw: rawOddsText,
+                            ninkiRaw: rawPopText
                         });
                     }
-                } catch (altRowError) {
-                    logger.error(`JRA 代替行処理中にエラー: ${altRowError}`);
+                } catch (error) {
+                    logger.error(`代替テーブル行[${index}]の処理中にエラー: ${error}`);
                 }
             });
         }
-
-        // 結果を並べ替え（馬番順）
+        
+        // 馬番順にソート
         horses.sort((a, b) => a.horseNumber - b.horseNumber);
-
-        logger.info(`JRA: レース ${raceId} の出走馬情報 ${horses.length} 件を取得しました。`);
+        
+        // オッズと人気順の統計
+        const horsesWithOdds = horses.filter(h => h.odds > 0).length;
+        const horsesWithPopularity = horses.filter(h => h.popularity > 0).length;
+        
+        // 結果をログに出力
+        logger.info(`JRA: レース ${raceId} の出走馬情報 ${horses.length} 件を取得しました。オッズあり: ${horsesWithOdds}件, 人気順あり: ${horsesWithPopularity}件`);
+        
+        // オッズと人気順の詳細をログに出力
+        horses.forEach((horse, index) => {
+            logger.debug(`馬[${index+1}]: ${horse.horseNumber}番 ${horse.horseName}, オッズ=${horse.odds}(生値:"${horse.oddsRaw}"), 人気=${horse.popularity}(生値:"${horse.ninkiRaw}")`);
+        });
+        
         return horses;
     } catch (error) {
         logger.error(`JRA出走馬情報取得中にエラー: ${error}`);
@@ -880,12 +908,12 @@ export async function fetchNarHorsesEnhanced(raceId) {
     try {
         // まずレース情報を検証
         const verifiedRace = await verifyRaceInformation(raceId);
-        
+
         // レースタイプがNARでなければ警告
         if (verifiedRace.type !== 'nar') {
             logger.warn(`レースID ${raceId} はNAR形式ではありませんが、NAR出走馬取得を試みます。`);
         }
-        
+
         const url = `https://nar.netkeiba.com/race/shutuba.html?race_id=${raceId}`;
         const debugFilename = `nar_horses_${raceId}_${uuidv4().substring(0, 8)}.html`;
 
@@ -910,13 +938,13 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 // 馬番 - 複数のセレクタパターンで試行
                 let horseNumber = '';
                 const umabanSelectors = [
-                    'td.Umaban', 
-                    'td.Umaban1', 
-                    'td.Umaban2', 
+                    'td.Umaban',
+                    'td.Umaban1',
+                    'td.Umaban2',
                     'td:nth-child(2)',
                     'td:nth-child(3)'
                 ];
-                
+
                 for (const selector of umabanSelectors) {
                     const cell = $(element).find(selector);
                     if (cell.length > 0) {
@@ -931,13 +959,13 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 // 枠番 - 複数のセレクタパターンで試行
                 let frameNumber = '';
                 const wakuSelectors = [
-                    'td.Waku', 
-                    'td.Waku1', 
-                    'td.Waku2', 
+                    'td.Waku',
+                    'td.Waku1',
+                    'td.Waku2',
                     'td:first-child',
                     'td:nth-child(1)'
                 ];
-                
+
                 for (const selector of wakuSelectors) {
                     const cell = $(element).find(selector);
                     if (cell.length > 0) {
@@ -952,12 +980,12 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 // 馬名 - 複数のセレクタパターンで試行
                 let horseName = '';
                 const horseNameSelectors = [
-                    '.HorseName a', 
+                    '.HorseName a',
                     'td:nth-child(4) a',
                     'a[target="_blank"][title]',
                     'a[href*="horse"]'
                 ];
-                
+
                 for (const selector of horseNameSelectors) {
                     const nameElem = $(element).find(selector);
                     if (nameElem.length > 0) {
@@ -972,13 +1000,13 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 // 騎手 - 複数のセレクタパターンで試行
                 let jockey = '';
                 const jockeySelectors = [
-                    '.Jockey a', 
+                    '.Jockey a',
                     '.Jockey span a',
                     'td:nth-child(6) a',
                     'td:nth-child(7) a',
                     'a[href*="jockey"]'
                 ];
-                
+
                 for (const selector of jockeySelectors) {
                     const jockeyElem = $(element).find(selector);
                     if (jockeyElem.length > 0) {
@@ -993,12 +1021,12 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 // 調教師名 - 複数のセレクタパターンで試行
                 let trainer = '';
                 const trainerSelectors = [
-                    '.Trainer a', 
+                    '.Trainer a',
                     'td:nth-child(8) a',
                     'td:nth-child(9) a',
                     'a[href*="trainer"]'
                 ];
-                
+
                 for (const selector of trainerSelectors) {
                     const trainerElem = $(element).find(selector);
                     if (trainerElem.length > 0) {
@@ -1013,12 +1041,12 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 // 馬体重 - 複数のセレクタパターンで試行
                 let weight = '';
                 const weightSelectors = [
-                    '.Weight', 
+                    '.Weight',
                     'td:nth-child(8)',
                     'td:nth-child(9)',
                     'td:nth-child(10)'
                 ];
-                
+
                 for (const selector of weightSelectors) {
                     const weightElem = $(element).find(selector);
                     if (weightElem.length > 0) {
@@ -1032,58 +1060,62 @@ export async function fetchNarHorsesEnhanced(raceId) {
 
                 // オッズ - NAR固有の構造から慎重に取得
                 let odds = 0;
-                
+                let rawOddsText = '';
+
                 // 1. .Odds_Ninki クラスを持つspanから取得
                 const oddsNinkiSpan = $(element).find('span.Odds_Ninki');
                 if (oddsNinkiSpan.length > 0) {
                     const oddsText = oddsNinkiSpan.text().trim();
+                    rawOddsText = oddsText;
                     if (oddsText && oddsText !== '---.-') {
-                        odds = parseFloat(oddsText) || 0;
+                        // 修正: オッズを正しく解析
+                        odds = parseOddsValue(oddsText);
                     }
                 }
-                
+
                 // 2. td.Popular.Txt_Rから取得
                 if (odds === 0) {
                     const oddsCells = $(element).find('td.Popular.Txt_R');
                     if (oddsCells.length > 0) {
                         // 最初にspanを探す
                         const spanText = oddsCells.find('span').text().trim();
+                        rawOddsText = spanText || oddsCells.text().trim();
                         if (spanText) {
-                            odds = parseFloat(spanText) || 0;
+                            // 修正: オッズを正しく解析
+                            odds = parseOddsValue(spanText);
                         } else {
                             // spanがない場合はtd自体のテキストを使用
-                            const cellText = oddsCells.text().trim().replace(/[^\d\.]/g, '');
-                            if (cellText) {
-                                odds = parseFloat(cellText) || 0;
-                            }
+                            const cellText = oddsCells.text().trim();
+                            rawOddsText = cellText;
+                            // 修正: オッズを正しく解析
+                            odds = parseOddsValue(cellText);
                         }
                     }
                 }
-                
+
                 // 3. より一般的なセレクタで試行
                 if (odds === 0) {
                     const oddsCells = $(element).find('td:nth-child(9), td:nth-child(10), td:nth-child(11)');
-                    
+
                     // ループを使用するが、breakの代わりにフラグを使用
                     let foundOdds = false;
                     oddsCells.each((i, cell) => {
                         if (foundOdds) return; // すでに見つかっている場合はスキップ
-                        
+
                         const text = $(cell).text().trim();
-                        // オッズらしき数値を探す（小数点を含む数値）
-                        if (text && /\d+\.\d+/.test(text)) {
-                            const match = text.match(/(\d+\.\d+)/);
-                            if (match) {
-                                odds = parseFloat(match[1]) || 0;
-                                foundOdds = true; // 見つかったらフラグをセット
-                            }
+                        rawOddsText = text;
+                        // オッズらしき数値を探す（小数点を含む数値またはオッズらしき数値）
+                        if (text && /\d+\.?\d*/.test(text)) {
+                            // 修正: オッズを正しく解析
+                            odds = parseOddsValue(text);
+                            foundOdds = true; // 見つかったらフラグをセット
                         }
                     });
                 }
 
                 // 人気 - NAR固有の構造から慎重に取得
                 let popularity = 0;
-                
+
                 // 1. td.Popular.Txt_C.BgYellowから取得
                 const popularityHighlightCell = $(element).find('td.Popular.Txt_C.BgYellow, td.BgYellow');
                 if (popularityHighlightCell.length > 0) {
@@ -1093,7 +1125,7 @@ export async function fetchNarHorsesEnhanced(raceId) {
                         popularity = parseInt(popText, 10) || 0;
                     }
                 }
-                
+
                 // 2. td.Popular.Txt_Cから取得
                 if (popularity === 0) {
                     const popularityCell = $(element).find('td.Popular.Txt_C');
@@ -1108,16 +1140,16 @@ export async function fetchNarHorsesEnhanced(raceId) {
                         }
                     }
                 }
-                
+
                 // 3. より一般的なセレクタで試行
                 if (popularity === 0) {
                     const popCells = $(element).find('td:nth-child(10), td:nth-child(11), td:nth-child(12)');
-                    
+
                     // ループを使用するが、breakの代わりにフラグを使用
                     let foundPopularity = false;
                     popCells.each((i, cell) => {
                         if (foundPopularity) return; // すでに見つかっている場合はスキップ
-                        
+
                         const text = $(cell).text().trim();
                         // 人気順はシンプルな1桁か2桁の数字
                         if (text && /^\d{1,2}$/.test(text)) {
@@ -1128,7 +1160,7 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 }
 
                 // デバッグログ
-                logger.debug(`NAR 行[${index + 1}]: 馬番=${horseNumber}, 枠番=${frameNumber}, 馬名=${horseName}, オッズ=${odds}, 人気=${popularity}`);
+                logger.debug(`NAR 行[${index + 1}]: 馬番=${horseNumber}, 枠番=${frameNumber}, 馬名=${horseName}, オッズ=${odds} (元テキスト:${rawOddsText}), 人気=${popularity}`);
 
                 // データの妥当性チェック
                 if (horseNumber && parseInt(horseNumber, 10) > 0 && parseInt(horseNumber, 10) <= 16) {
@@ -1137,7 +1169,7 @@ export async function fetchNarHorsesEnhanced(raceId) {
                         logger.warn(`不正な馬名をスキップ: ${horseName} (馬番: ${horseNumber})`);
                         return; // continue と同じ効果
                     }
-                    
+
                     horses.push({
                         frameNumber: parseInt(frameNumber, 10) || 0,
                         horseNumber: parseInt(horseNumber, 10),
@@ -1159,28 +1191,28 @@ export async function fetchNarHorsesEnhanced(raceId) {
         // 特殊なケース：出走馬情報が見つからなかった場合の代替方法
         if (horses.length === 0) {
             logger.warn(`NAR: 標準的な方法で出走馬情報が取得できませんでした。代替方法を試みます。`);
-            
+
             // すべての行を詳細にデバッグ
             debugAllRows($, 'table tr');
-            
+
             // Shutuba_Table や RaceTableArea も探す
             $('.Shutuba_Table tr, .RaceTableArea tr').each((index, row) => {
                 // ヘッダー行をスキップ
                 if (index === 0 || $(row).find('th').length > 0) {
                     return;
                 }
-                
+
                 try {
                     // すべてのセルを調査
                     const cells = $(row).find('td');
                     if (cells.length < 4) return;
-                    
+
                     // 各情報を取得
                     const frameNumber = $(cells[0]).text().trim().replace(/\D/g, '');
                     const horseNumber = $(cells[1]).text().trim().replace(/\D/g, '');
                     const horseName = $(cells).find('a[href*="horse"]').text().trim();
                     const jockey = $(cells).find('a[href*="jockey"]').text().trim();
-                    
+
                     // 馬番の妥当性チェック
                     if (horseNumber && parseInt(horseNumber, 10) > 0 && parseInt(horseNumber, 10) <= 16 && horseName) {
                         horses.push({

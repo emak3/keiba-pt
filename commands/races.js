@@ -1,6 +1,8 @@
+// commands/races.js の修正版（オッズ表示の修正）
+
 import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { getRacesByDate, getRaceById } from '../services/database/raceService.js';
-import { saveUser, getUser } from '../services/database/userService.js';
+import { getUser, saveUser } from '../services/database/userService.js';
 import { placeBet } from '../services/database/betService.js';
 import dayjs from 'dayjs';
 import logger from '../utils/logger.js';
@@ -1103,6 +1105,10 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
         }
       });
 
+      // ================================
+      // 修正: オッズ表示を正確に行う
+      // ================================
+
       // 要求された新しいフォーマットで表示
       sortedHorses.forEach(horse => {
         // 枠番と馬番の表示（「枠番がない場合は?」という条件を含む）
@@ -1113,7 +1119,8 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
 
         // オッズ情報を表示（情報があれば）
         if (horse.odds && horse.odds > 0) {
-          horseString += ` (${horse.odds}倍)`;
+          // 修正：小数点以下1桁で表示
+          horseString += ` (${horse.odds.toFixed(1)}倍)`;
           if (horse.popularity && horse.popularity > 0) {
             horseString += ` - ${horse.popularity}人気`;
           }
@@ -1365,12 +1372,16 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
     // 出走馬情報に基づいてオプションを作成
     filteredHorses.sort((a, b) => a.horseNumber - b.horseNumber);
 
+    // ================================
+    // 修正: オッズ表示を正確に行う
+    // ================================
+
     filteredHorses.forEach(horse => {
       let description = `騎手: ${horse.jockey || '情報なし'}`;
 
-      // オッズ情報があれば表示
+      // オッズ情報があれば表示（小数点以下1桁で表示）
       if (horse.odds && horse.odds > 0) {
-        description += ` / オッズ: ${horse.odds}倍`;
+        description += ` / オッズ: ${horse.odds.toFixed(1)}倍`;
         if (horse.popularity && horse.popularity > 0) {
           description += ` (${horse.popularity}人気)`;
         }
@@ -1862,4 +1873,36 @@ function getMinSelectionsForBet(betType) {
   };
 
   return minSelections[betType] || 1;
+}
+
+/**
+ * fetchJraHorsesEnhanced関数を外部ファイルからインポート
+ * @param {string} raceId - レースID
+ * @returns {Promise<Array>} 出走馬情報
+ */
+async function fetchJraHorsesEnhanced(raceId) {
+  try {
+    // enhancedScraper.jsからインポート
+    const { fetchJraHorsesEnhanced } = await import('../services/scraper/enhancedScraper.js');
+    return await fetchJraHorsesEnhanced(raceId);
+  } catch (error) {
+    logger.error(`JRA出走馬情報インポートエラー: ${error}`);
+    return [];
+  }
+}
+
+/**
+ * fetchNarHorsesEnhanced関数を外部ファイルからインポート
+ * @param {string} raceId - レースID
+ * @returns {Promise<Array>} 出走馬情報
+ */
+async function fetchNarHorsesEnhanced(raceId) {
+  try {
+    // enhancedScraper.jsからインポート
+    const { fetchNarHorsesEnhanced } = await import('../services/scraper/enhancedScraper.js');
+    return await fetchNarHorsesEnhanced(raceId);
+  } catch (error) {
+    logger.error(`NAR出走馬情報インポートエラー: ${error}`);
+    return [];
+  }
 }
