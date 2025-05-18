@@ -1,5 +1,4 @@
-// index.js の修正版
-// エンコーディング問題対応のための変更部分
+// index.js
 import { setupInteractionHandlers } from './utils/interactionHandlers.js';
 import { Client, GatewayIntentBits, Collection, Events, REST, Routes } from 'discord.js';
 import { config } from 'dotenv';
@@ -45,6 +44,12 @@ async function loadCommands() {
     const commandModule = await import(`file://${filePath}`);
     const command = commandModule.default;
 
+    // bet.js コマンドはスキップ (races.js に統合)
+    if (file === 'bet.js') {
+      logger.info(`コマンド bet.js はスキップされました。`);
+      continue;
+    }
+
     // コマンドの登録
     if ('data' in command && 'execute' in command) {
       client.commands.set(command.data.name, command);
@@ -79,13 +84,18 @@ async function registerCommands() {
 }
 
 // Discord Bot準備完了時の処理
-client.once(Events.ClientReady, () => {
+client.once(Events.ClientReady, async () => {
   logger.info(`${client.user.tag} として準備完了！`);
+  
+  // インタラクションハンドラーの設定
   setupInteractionHandlers(client);
+  
   // 強化版レーススケジューラーの開始
-  // 文字エンコーディング修正版を使用する
   startEnhancedRaceScheduler(client);
-  logger.info('強化版スケジューラー（文字エンコーディング修正対応）を開始しました。');
+  logger.info('強化版スケジューラーを開始しました。');
+  
+  // グローバル変数の初期化（馬券購入セッション管理用）
+  global.betSessions = {};
 });
 
 // インタラクション（スラッシュコマンド）の処理
@@ -109,13 +119,41 @@ client.on(Events.InteractionCreate, async interaction => {
       ephemeral: true
     };
 
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp(replyOptions);
-    } else {
-      await interaction.reply(replyOptions);
+    try {
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(replyOptions);
+      } else {
+        await interaction.reply(replyOptions);
+      }
+    } catch (replyError) {
+      logger.error(`エラー応答中にさらにエラーが発生しました: ${replyError}`);
     }
   }
 });
+
+// 定期的なセッション管理（1時間ごとに古いセッションをクリア）
+setInterval(() => {
+  try {
+    if (global.betSessions) {
+      const now = Date.now();
+      const oneHour = 60 * 60 * 1000;
+      let count = 0;
+      
+      for (const key in global.betSessions) {
+        if (global.betSessions[key].timestamp && now - global.betSessions[key].timestamp > oneHour) {
+          delete global.betSessions[key];
+          count++;
+        }
+      }
+      
+      if (count > 0) {
+        logger.info(`期限切れのセッション ${count} 件をクリアしました。`);
+      }
+    }
+  } catch (error) {
+    logger.error(`セッションクリア中にエラーが発生しました: ${error}`);
+  }
+}, 60 * 60 * 1000);
 
 // Discordへのログイン
 client.login(process.env.BOT_TOKEN).then(() => {

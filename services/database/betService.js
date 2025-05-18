@@ -1,3 +1,4 @@
+// services/database/betService.js
 import { doc, collection, setDoc, getDoc, getDocs, query, where, limit, orderBy } from 'firebase/firestore';
 import { getDb } from '../../config/firebase-config.js';
 import { subtractPoints } from './userService.js';
@@ -104,47 +105,82 @@ function validateBetSelections(betType, selections, method) {
     sanrentan: 3   // 三連単: 3頭
   };
   
-  // 選択数の検証
-  const flatSelections = Array.isArray(selections[0]) ? selections.flat() : selections;
+  // フォーメーション方式の場合は特別な検証
+  if (method === 'formation') {
+    if (betType === 'tansho' || betType === 'fukusho') {
+      throw new Error(`${betType}はフォーメーション購入できません。`);
+    }
+    
+    // 馬単・三連単は二次元配列
+    if (betType === 'umatan' || betType === 'sanrentan') {
+      if (!Array.isArray(selections) || !Array.isArray(selections[0])) {
+        throw new Error('フォーメーション購入の選択データが不正です。');
+      }
+      
+      // 各着順に最低1頭以上選択されていること
+      for (const posSelections of selections) {
+        if (!Array.isArray(posSelections) || posSelections.length === 0) {
+          throw new Error('各着順に少なくとも1頭選択してください。');
+        }
+      }
+      
+      // 着順数の確認
+      if ((betType === 'umatan' && selections.length !== 2) || 
+          (betType === 'sanrentan' && selections.length !== 3)) {
+        throw new Error(`${betType}の着順選択数が正しくありません。`);
+      }
+    }
+    // その他の馬券は一次元配列
+    else {
+      if (!Array.isArray(selections) || selections.length < requiredSelections[betType]) {
+        throw new Error(`${betType}のフォーメーション購入には最低${requiredSelections[betType]}頭を選択してください。`);
+      }
+    }
+    
+    return; // フォーメーションの検証はここまで
+  }
+  
+  // 通常・ボックス購入の場合
+  const isFlatArray = !Array.isArray(selections[0]);
+  const flatSelections = isFlatArray ? selections : selections.flat();
   
   if (method === 'normal') {
-    // 通常購入の場合
+    // 馬単・三連単は特別な形式
     if (betType === 'umatan' || betType === 'sanrentan') {
-      // 順番ありの馬券は配列の入れ子
-      if (!Array.isArray(selections[0])) {
-        throw new Error(`${betType}は順番を指定する必要があります。`);
+      // フラット配列ならエラー
+      if (isFlatArray) {
+        // 数が正しいか検証
+        if (flatSelections.length !== requiredSelections[betType]) {
+          throw new Error(`${betType}には${requiredSelections[betType]}頭を選択してください。`);
+        }
+      } else {
+        // 次元配列の構造を検証
+        if ((betType === 'umatan' && selections.length !== 2) ||
+            (betType === 'sanrentan' && selections.length !== 3)) {
+          throw new Error(`${betType}の着順選択数が正しくありません。`);
+        }
       }
     } else {
-      // 順番なしの馬券は単純な配列
+      // それ以外の馬券
       if (flatSelections.length !== requiredSelections[betType]) {
         throw new Error(`${betType}には${requiredSelections[betType]}頭を選択してください。`);
       }
     }
   } else if (method === 'box') {
-    // ボックス購入の場合
+    // ボックス購入の検証
     if (betType === 'tansho' || betType === 'fukusho') {
       throw new Error(`${betType}はボックス購入できません。`);
     }
     
+    // 必要最小数のチェック
     if (flatSelections.length < requiredSelections[betType]) {
       throw new Error(`${betType}のボックス購入には最低${requiredSelections[betType]}頭を選択してください。`);
     }
     
-    // ボックスの最大選択数の検証（三連系は最大7頭、二連系は最大10頭程度）
-    const maxSelections = (betType === 'sanrentan' || betType === 'sanrenpuku') ? 7 : 10;
+    // 最大選択数のチェック
+    const maxSelections = (betType === 'sanrentan' || betType === 'sanrenpuku') ? 7 : 8;
     if (flatSelections.length > maxSelections) {
       throw new Error(`${betType}のボックス購入は最大${maxSelections}頭までです。`);
-    }
-  } else if (method === 'formation') {
-    // フォーメーション購入の場合
-    if (betType === 'tansho' || betType === 'fukusho') {
-      throw new Error(`${betType}はフォーメーション購入できません。`);
-    }
-    
-    // フォーメーションの形式に応じたバリデーション
-    // ここでは簡略化のため、フォーメーションの詳細検証は省略
-    if (!Array.isArray(selections) || selections.length < 2) {
-      throw new Error('フォーメーション購入には複数の選択肢が必要です。');
     }
   }
   
@@ -152,184 +188,6 @@ function validateBetSelections(betType, selections, method) {
   if (method === 'normal' && new Set(flatSelections).size !== flatSelections.length) {
     throw new Error('同じ馬番を複数選択することはできません。');
   }
-}
-
-/**
- * レース結果に基づいて馬券の的中確認と払戻金計算
- * @param {Object} bet - 馬券情報
- * @param {Object} payouts - 払戻情報
- * @returns {number} 払戻金額
- */
-export function calculatePayout(bet, payouts) {
-  // レースの払戻情報が存在しない場合
-  if (!payouts) {
-    return 0;
-  }
-  
-  // 馬券タイプに対応する払戻情報がない場合
-  const betTypePayoutMap = {
-    tansho: payouts.tansho,
-    fukusho: payouts.fukusho,
-    wakuren: payouts.wakuren,
-    umaren: payouts.umaren,
-    wide: payouts.wide,
-    umatan: payouts.umatan,
-    sanrenpuku: payouts.sanrenpuku,
-    sanrentan: payouts.sanrentan
-  };
-  
-  const targetPayouts = betTypePayoutMap[bet.betType];
-  if (!targetPayouts || targetPayouts.length === 0) {
-    return 0;
-  }
-  
-  // 馬券の購入方法に応じた的中確認
-  let payout = 0;
-  
-  switch (bet.method) {
-    case 'normal':
-      payout = calculateNormalPayout(bet, targetPayouts);
-      break;
-    case 'box':
-      payout = calculateBoxPayout(bet, targetPayouts);
-      break;
-    case 'formation':
-      payout = calculateFormationPayout(bet, targetPayouts);
-      break;
-    default:
-      logger.warn(`未知の馬券購入方法: ${bet.method}`);
-      return 0;
-  }
-  
-  // 100円単位での払戻計算（100ptが1ユニット）
-  return Math.floor(payout * (bet.amount / 100));
-}
-
-/**
- * 通常購入馬券の払戻計算
- * @param {Object} bet - 馬券情報
- * @param {Array} payouts - 馬券タイプに対応する払戻情報
- * @returns {number} 払戻金額（100円あたり）
- */
-function calculateNormalPayout(bet, payouts) {
-  const selections = bet.selections;
-  
-  // 的中馬券を検索
-  for (const p of payouts) {
-    // 馬券タイプごとの的中判定
-    let isWin = false;
-    
-    switch (bet.betType) {
-      case 'tansho': // 単勝
-      case 'fukusho': // 複勝
-        isWin = p.numbers.includes(selections[0]);
-        break;
-        
-      case 'wakuren': // 枠連
-      case 'umaren': // 馬連
-      case 'wide': // ワイド
-        // 順不同の2頭/枠選択
-        isWin = p.numbers.includes(selections[0]) && p.numbers.includes(selections[1]) && 
-                p.numbers.length === selections.length;
-        break;
-        
-      case 'umatan': // 馬単
-        // 順序付きの2頭選択
-        isWin = p.numbers[0] === selections[0] && p.numbers[1] === selections[1];
-        break;
-        
-      case 'sanrenpuku': // 三連複
-        // 順不同の3頭選択
-        isWin = p.numbers.includes(selections[0]) && 
-                p.numbers.includes(selections[1]) && 
-                p.numbers.includes(selections[2]) && 
-                p.numbers.length === selections.length;
-        break;
-        
-      case 'sanrentan': // 三連単
-        // 順序付きの3頭選択
-        isWin = p.numbers[0] === selections[0] && 
-                p.numbers[1] === selections[1] && 
-                p.numbers[2] === selections[2];
-        break;
-        
-      default:
-        logger.warn(`未知の馬券タイプ: ${bet.betType}`);
-        return 0;
-    }
-    
-    if (isWin) {
-      return p.payout;
-    }
-  }
-  
-  return 0;
-}
-
-/**
- * ボックス購入馬券の払戻計算
- * @param {Object} bet - 馬券情報
- * @param {Array} payouts - 馬券タイプに対応する払戻情報
- * @returns {number} 払戻金額（100円あたり）
- */
-function calculateBoxPayout(bet, payouts) {
-  const selections = bet.selections;
-  
-  // 的中馬券を検索
-  for (const p of payouts) {
-    // 馬券タイプごとの的中判定
-    let isWin = false;
-    
-    switch (bet.betType) {
-      case 'wakuren': // 枠連
-      case 'umaren': // 馬連
-      case 'wide': // ワイド
-        // ボックスの場合、選択した馬/枠が的中した払戻に含まれているかチェック
-        isWin = p.numbers.every(num => selections.includes(num));
-        break;
-        
-      case 'umatan': // 馬単
-        // 馬単ボックスは、選択した馬が的中した払戻に含まれているかチェック
-        isWin = p.numbers.every(num => selections.includes(num));
-        break;
-        
-      case 'sanrenpuku': // 三連複
-        // 三連複ボックスは、選択した馬が的中した払戻に含まれているかチェック
-        isWin = p.numbers.every(num => selections.includes(num));
-        break;
-        
-      case 'sanrentan': // 三連単
-        // 三連単ボックスは、選択した馬が的中した払戻に含まれているかチェック
-        isWin = p.numbers.every(num => selections.includes(num));
-        break;
-        
-      default:
-        logger.warn(`未知のボックス馬券タイプ: ${bet.betType}`);
-        return 0;
-    }
-    
-    if (isWin) {
-      // ボックスの組み合わせ数で割る（簡略化のため省略）
-      // 実際には組み合わせ計算が必要
-      return p.payout;
-    }
-  }
-  
-  return 0;
-}
-
-/**
- * フォーメーション購入馬券の払戻計算
- * @param {Object} bet - 馬券情報
- * @param {Array} payouts - 馬券タイプに対応する払戻情報
- * @returns {number} 払戻金額（100円あたり）
- */
-function calculateFormationPayout(bet, payouts) {
-  // フォーメーション馬券の計算は複雑なため、ここでは簡略化
-  // 実際の実装では選択フォーメーションに応じた組み合わせ計算が必要
-  
-  // サンプル実装として、通常馬券と同様の計算を行う
-  return calculateNormalPayout(bet, payouts);
 }
 
 /**
@@ -360,19 +218,27 @@ export async function getUserBets(userId, limitCount = 10) {
     
     // レース情報を付加
     const betsWithRace = await Promise.all(bets.map(async (bet) => {
-      const race = await getRaceById(bet.raceId);
-      return {
-        ...bet,
-        race: race ? {
-          id: race.id,
-          name: race.name,
-          venue: race.venue,
-          number: race.number,
-          date: race.date,
-          time: race.time,
-          status: race.status
-        } : null
-      };
+      try {
+        const race = await getRaceById(bet.raceId);
+        return {
+          ...bet,
+          race: race ? {
+            id: race.id,
+            name: race.name,
+            venue: race.venue,
+            number: race.number,
+            date: race.date,
+            time: race.time,
+            status: race.status
+          } : null
+        };
+      } catch (error) {
+        logger.error(`レース情報取得エラー (betId=${bet.id}): ${error}`);
+        return {
+          ...bet,
+          race: null
+        };
+      }
     }));
     
     return betsWithRace;

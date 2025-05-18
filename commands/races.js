@@ -1,3 +1,4 @@
+// commands/races.js
 import { 
   SlashCommandBuilder, 
   EmbedBuilder, 
@@ -10,6 +11,7 @@ import { getRacesByDate, getRaceById } from '../services/database/raceService.js
 import { getUser, saveUser } from '../services/database/userService.js';
 import dayjs from 'dayjs';
 import logger from '../utils/logger.js';
+import BetHandler from '../utils/betHandler.js';
 
 // 会場コードと名称のマッピング
 const venueCodeMap = {
@@ -248,245 +250,26 @@ export default {
         try {
           if (i.customId.startsWith('races_prev_') || i.customId.startsWith('races_next_')) {
             // 日付移動の処理
-            try {
-              const newDate = i.customId.split('_')[2];
-              history.previousStates.push({
-                date: history.currentDate,
-                venue: null // 全体表示に戻る
-              });
-              history.currentDate = newDate;
-
-              try {
-                await i.deferUpdate();
-              } catch (deferError) {
-                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
-              }
-
-              try {
-                await i.editReply({ content: '読み込み中...', embeds: [], components: [] });
-              } catch (editError) {
-                logger.warn(`editReply エラー (無視して続行): ${editError}`);
-              }
-
-              // 新しい日付でコマンドを再実行
-              const command = interaction.client.commands.get('races');
-              const newInteraction = {
-                ...interaction,
-                options: {
-                  getString: () => newDate
-                },
-                editReply: async (options) => {
-                  try {
-                    return await i.editReply(options);
-                  } catch (editError) {
-                    logger.error(`編集エラー: ${editError}`);
-                    try {
-                      return await i.followUp({ ...options, ephemeral: false });
-                    } catch (followupError) {
-                      logger.error(`フォローアップエラー: ${followupError}`);
-                    }
-                  }
-                }
-              };
-
-              await command.execute(newInteraction);
-            } catch (error) {
-              logger.error(`日付移動処理エラー: ${error}`);
-              handleInteractionError(i, error);
-            }
+            await handleDateNavigation(i, interaction, history);
           }
           // 会場選択
           else if (i.customId.startsWith('races_select_venue_')) {
-            try {
-              const [venueCode, date] = i.values[0].split('_');
-              history.previousStates.push({
-                date: history.currentDate,
-                venue: null // 全体表示に戻る
-              });
-
-              try {
-                await i.deferUpdate();
-              } catch (deferError) {
-                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
-              }
-
-              // 選択された会場のレースを表示
-              await displayVenueRaces(i, venueCode, date, history, races);
-            } catch (error) {
-              logger.error(`会場選択処理エラー: ${error}`);
-              handleInteractionError(i, error);
-            }
+            await handleVenueSelection(i, history);
           }
           // 戻るボタン
           else if (i.customId.startsWith('races_back_')) {
-            try {
-              if (history.previousStates.length > 0) {
-                const previousState = history.previousStates.pop();
-
-                try {
-                  await i.deferUpdate();
-                } catch (deferError) {
-                  logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
-                }
-
-                if (previousState.venue) {
-                  // 特定の会場に戻る
-                  await displayVenueRaces(i, previousState.venue, previousState.date, history, races);
-                } else {
-                  // 会場一覧に戻る
-                  try {
-                    await i.editReply({ content: '会場一覧に戻ります...', embeds: [], components: [] });
-                  } catch (editError) {
-                    logger.warn(`戻る中間メッセージエラー: ${editError}`);
-                  }
-
-                  const command = interaction.client.commands.get('races');
-                  const newInteraction = {
-                    ...interaction,
-                    options: {
-                      getString: () => previousState.date
-                    },
-                    editReply: async (options) => {
-                      try {
-                        return await i.editReply(options);
-                      } catch (editError) {
-                        logger.error(`編集エラー: ${editError}`);
-                        try {
-                          return await i.followUp({ ...options, ephemeral: false });
-                        } catch (followupError) {
-                          logger.error(`フォローアップエラー: ${followupError}`);
-                        }
-                      }
-                    }
-                  };
-
-                  await command.execute(newInteraction);
-                }
-              } else {
-                try {
-                  await i.update({ content: '前の画面に戻れません。' });
-                } catch (updateError) {
-                  logger.warn(`履歴なしエラー (次の処理にフォールバック): ${updateError}`);
-                  try {
-                    await i.editReply({ content: '前の画面に戻れません。' });
-                  } catch (editError) {
-                    logger.error(`履歴なしエラー編集失敗: ${editError}`);
-                  }
-                }
-              }
-            } catch (error) {
-              logger.error(`戻るボタン処理エラー: ${error}`);
-              handleInteractionError(i, error);
-            }
+            await handleBackButton(i, interaction, history);
           }
           // レース選択
           else if (i.customId.startsWith('races_select_race_')) {
-            try {
-              try {
-                await i.deferUpdate();
-              } catch (deferError) {
-                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
-              }
-
-              const raceId = i.values[0];
-
-              if (!raceId) {
-                logger.error('レース選択: レースIDが取得できませんでした');
-                await i.editReply({
-                  content: 'レース情報の取得に失敗しました。もう一度お試しください。',
-                  components: []
-                });
-                return;
-              }
-
-              try {
-                await i.editReply({
-                  content: `レース情報を読み込み中...`,
-                  embeds: [],
-                  components: []
-                });
-              } catch (editError) {
-                logger.warn(`レース情報読み込み中表示エラー: ${editError}`);
-              }
-
-              const currentDate = history.currentDate || targetDate;
-              await displayRaceDetail(i, raceId, currentDate, history);
-            } catch (error) {
-              logger.error(`レース選択処理エラー: ${error}`);
-              handleInteractionError(i, error);
-            }
+            await handleRaceSelection(i, history);
           }
-          // 馬券タイプ選択 (ここから馬券購入プロセスが始まるので、インタラクションハンドラーに移譲)
-          else if (i.customId.startsWith('bet_select_type_')) {
-            try {
-              // このインタラクションは interactionHandlers.js で処理するので、
-              // ここではデファーだけして処理を終了する
-              try {
-                await i.deferUpdate();
-              } catch (deferError) {
-                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
-              }
-              
-              // 必要であればメッセージを表示
-              await i.editReply({
-                content: '馬券購入処理に進みます...',
-                components: []
-              });
-              
-              // インタラクションハンドラーがこれ以降を処理
-            } catch (error) {
-              logger.error(`馬券タイプ選択処理エラー: ${error}`);
-              handleInteractionError(i, error);
-            }
-          }
+          // 馬券タイプ選択は betHandler.js で処理
         } catch (error) {
           logger.error(`インタラクション処理全体でのエラー: ${error}`);
-          handleInteractionError(i, error);
+          await handleInteractionError(i, error);
         }
       });
-
-      async function handleInteractionError(interaction, error) {
-        try {
-          if (interaction.replied) {
-            await interaction.followUp({
-              content: 'エラーが発生しました。もう一度操作をお試しください。',
-              ephemeral: true
-            });
-          } else if (interaction.deferred) {
-            await interaction.editReply({
-              content: 'エラーが発生しました。もう一度操作をお試しください。',
-            });
-          } else {
-            if (typeof interaction.update === 'function') {
-              try {
-                await interaction.update({
-                  content: 'エラーが発生しました。もう一度操作をお試しください。',
-                });
-              } catch (updateError) {
-                try {
-                  await interaction.reply({
-                    content: 'エラーが発生しました。もう一度操作をお試しください。',
-                    ephemeral: true
-                  });
-                } catch (replyError) {
-                  logger.error(`応答失敗: ${replyError}`);
-                }
-              }
-            } else {
-              try {
-                await interaction.reply({
-                  content: 'エラーが発生しました。もう一度操作をお試しください。',
-                  ephemeral: true
-                });
-              } catch (replyError) {
-                logger.error(`応答失敗: ${replyError}`);
-              }
-            }
-          }
-        } catch (responseError) {
-          logger.error(`エラー通知中の二次エラー: ${responseError}`);
-        }
-      }
 
       collector.on('end', () => {
         // コレクターの終了時の処理
@@ -498,6 +281,234 @@ export default {
     }
   }
 };
+
+/**
+ * 日付ナビゲーション処理
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ * @param {CommandInteraction} originalInteraction - 元のコマンドインタラクション
+ * @param {Object} history - ナビゲーション履歴
+ */
+async function handleDateNavigation(interaction, originalInteraction, history) {
+  const newDate = interaction.customId.split('_')[2];
+  history.previousStates.push({
+    date: history.currentDate,
+    venue: null // 全体表示に戻る
+  });
+  history.currentDate = newDate;
+
+  try {
+    await interaction.deferUpdate();
+  } catch (deferError) {
+    logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+  }
+
+  try {
+    await interaction.editReply({ content: '読み込み中...', embeds: [], components: [] });
+  } catch (editError) {
+    logger.warn(`editReply エラー (無視して続行): ${editError}`);
+  }
+
+  // 新しい日付でコマンドを再実行
+  const command = originalInteraction.client.commands.get('races');
+  const newInteraction = {
+    ...originalInteraction,
+    options: {
+      getString: () => newDate
+    },
+    editReply: async (options) => {
+      try {
+        return await interaction.editReply(options);
+      } catch (editError) {
+        logger.error(`編集エラー: ${editError}`);
+        try {
+          return await interaction.followUp({ ...options, ephemeral: false });
+        } catch (followupError) {
+          logger.error(`フォローアップエラー: ${followupError}`);
+        }
+      }
+    }
+  };
+
+  await command.execute(newInteraction);
+}
+
+/**
+ * 会場選択処理
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ * @param {Object} history - ナビゲーション履歴
+ */
+async function handleVenueSelection(interaction, history) {
+  const [venueCode, date] = interaction.values[0].split('_');
+  
+  history.previousStates.push({
+    date: history.currentDate,
+    venue: null // 全体表示に戻る
+  });
+  history.currentDate = date;
+
+  try {
+    await interaction.deferUpdate();
+  } catch (deferError) {
+    logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+  }
+
+  // レース一覧を取得
+  const races = await getRacesByDate(date);
+  
+  // 選択された会場のレースを表示
+  await displayVenueRaces(interaction, venueCode, date, races);
+}
+
+/**
+ * 戻るボタン処理
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ * @param {CommandInteraction} originalInteraction - 元のコマンドインタラクション
+ * @param {Object} history - ナビゲーション履歴
+ */
+async function handleBackButton(interaction, originalInteraction, history) {
+  if (history.previousStates.length > 0) {
+    const previousState = history.previousStates.pop();
+
+    try {
+      await interaction.deferUpdate();
+    } catch (deferError) {
+      logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+    }
+
+    if (previousState.venue) {
+      // 特定の会場に戻る
+      const races = await getRacesByDate(previousState.date);
+      await displayVenueRaces(interaction, previousState.venue, previousState.date, races);
+    } else {
+      // 会場一覧に戻る
+      try {
+        await interaction.editReply({ content: '会場一覧に戻ります...', embeds: [], components: [] });
+      } catch (editError) {
+        logger.warn(`戻る中間メッセージエラー: ${editError}`);
+      }
+
+      const command = originalInteraction.client.commands.get('races');
+      const newInteraction = {
+        ...originalInteraction,
+        options: {
+          getString: () => previousState.date
+        },
+        editReply: async (options) => {
+          try {
+            return await interaction.editReply(options);
+          } catch (editError) {
+            logger.error(`編集エラー: ${editError}`);
+            try {
+              return await interaction.followUp({ ...options, ephemeral: false });
+            } catch (followupError) {
+              logger.error(`フォローアップエラー: ${followupError}`);
+            }
+          }
+        }
+      };
+
+      await command.execute(newInteraction);
+    }
+  } else {
+    try {
+      await interaction.update({ content: '前の画面に戻れません。' });
+    } catch (updateError) {
+      logger.warn(`履歴なしエラー (次の処理にフォールバック): ${updateError}`);
+      try {
+        await interaction.editReply({ content: '前の画面に戻れません。' });
+      } catch (editError) {
+        logger.error(`履歴なしエラー編集失敗: ${editError}`);
+      }
+    }
+  }
+}
+
+/**
+ * レース選択処理
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ * @param {Object} history - ナビゲーション履歴
+ */
+async function handleRaceSelection(interaction, history) {
+  try {
+    await interaction.deferUpdate();
+  } catch (deferError) {
+    logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+  }
+
+  const raceId = interaction.values[0];
+
+  if (!raceId) {
+    logger.error('レース選択: レースIDが取得できませんでした');
+    await interaction.editReply({
+      content: 'レース情報の取得に失敗しました。もう一度お試しください。',
+      components: []
+    });
+    return;
+  }
+
+  try {
+    await interaction.editReply({
+      content: `レース情報を読み込み中...`,
+      embeds: [],
+      components: []
+    });
+  } catch (editError) {
+    logger.warn(`レース情報読み込み中表示エラー: ${editError}`);
+  }
+
+  const currentDate = history.currentDate;
+  
+  // レース詳細表示 - true は馬券購入メニューを表示する
+  await displayRaceDetail(interaction, raceId, true);
+}
+
+/**
+ * インタラクションエラー処理
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ * @param {Error} error - エラーオブジェクト
+ */
+async function handleInteractionError(interaction, error) {
+  try {
+    if (interaction.replied) {
+      await interaction.followUp({
+        content: 'エラーが発生しました。もう一度操作をお試しください。',
+        ephemeral: true
+      });
+    } else if (interaction.deferred) {
+      await interaction.editReply({
+        content: 'エラーが発生しました。もう一度操作をお試しください。',
+      });
+    } else {
+      if (typeof interaction.update === 'function') {
+        try {
+          await interaction.update({
+            content: 'エラーが発生しました。もう一度操作をお試しください。',
+          });
+        } catch (updateError) {
+          try {
+            await interaction.reply({
+              content: 'エラーが発生しました。もう一度操作をお試しください。',
+              ephemeral: true
+            });
+          } catch (replyError) {
+            logger.error(`応答失敗: ${replyError}`);
+          }
+        }
+      } else {
+        try {
+          await interaction.reply({
+            content: 'エラーが発生しました。もう一度操作をお試しください。',
+            ephemeral: true
+          });
+        } catch (replyError) {
+          logger.error(`応答失敗: ${replyError}`);
+        }
+      }
+    }
+  } catch (responseError) {
+    logger.error(`エラー通知中の二次エラー: ${responseError}`);
+  }
+}
 
 /**
  * レースを会場コード別にグループ化
@@ -567,10 +578,9 @@ function cleanVenueName(venue) {
  * @param {MessageComponentInteraction} interaction - インタラクション
  * @param {string} venueCode - 会場コード
  * @param {string} dateString - 日付
- * @param {Object} history - ナビゲーション履歴
- * @param {Array} allRaces - すべてのレース一覧（既に取得済み）
+ * @param {Array} allRaces - すべてのレース一覧
  */
-async function displayVenueRaces(interaction, venueCode, dateString, history, allRaces) {
+async function displayVenueRaces(interaction, venueCode, dateString, allRaces) {
   try {
     // 会場コードに合致するレースを抽出
     const venueRaces = allRaces.filter(race => extractVenueCode(race.id) === venueCode);
@@ -690,10 +700,9 @@ async function displayVenueRaces(interaction, venueCode, dateString, history, al
  * レース詳細と馬券購入画面を表示
  * @param {MessageComponentInteraction} interaction - インタラクション
  * @param {string} raceId - レースID
- * @param {string} dateString - 日付
- * @param {Object} history - ナビゲーション履歴
+ * @param {boolean} showBetMenu - 馬券購入メニューを表示するかどうか
  */
-async function displayRaceDetail(interaction, raceId, dateString, history) {
+async function displayRaceDetail(interaction, raceId, showBetMenu = false) {
   try {
     // レース情報を取得
     const race = await getRaceById(raceId);
@@ -782,39 +791,47 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
 
     raceEmbed.addFields({ name: '出走馬', value: horsesInfo });
 
-    // 馬券種類選択メニュー
-    const betTypeRow = new ActionRowBuilder()
-      .addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId(`bet_select_type_${raceId}`)
-          .setPlaceholder('馬券の種類を選択してください')
-          .addOptions([
-            { label: '単勝', value: 'tansho', description: '1着になる馬を当てる', emoji: '🥇' },
-            { label: '複勝', value: 'fukusho', description: '3着以内に入る馬を当てる', emoji: '🏆' },
-            { label: '枠連', value: 'wakuren', description: '1着と2着になる枠を当てる（順不同）', emoji: '🔢' },
-            { label: '馬連', value: 'umaren', description: '1着と2着になる馬を当てる（順不同）', emoji: '🐎' },
-            { label: 'ワイド', value: 'wide', description: '3着以内に入る2頭の馬を当てる（順不同）', emoji: '📊' },
-            { label: '馬単', value: 'umatan', description: '1着と2着になる馬を当てる（順序通り）', emoji: '🎯' },
-            { label: '三連複', value: 'sanrenpuku', description: '1着から3着までの馬を当てる（順不同）', emoji: '🔄' },
-            { label: '三連単', value: 'sanrentan', description: '1着から3着までの馬を当てる（順序通り）', emoji: '💯' }
-          ])
-      );
+    // コンポーネント配列
+    const components = [];
+
+    // 馬券種類選択メニュー（表示する場合のみ）
+    if (showBetMenu) {
+      const betTypeRow = new ActionRowBuilder()
+        .addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(`bet_select_type_${raceId}`)
+            .setPlaceholder('馬券の種類を選択してください')
+            .addOptions([
+              { label: '単勝', value: 'tansho', description: '1着になる馬を当てる', emoji: '🥇' },
+              { label: '複勝', value: 'fukusho', description: '3着以内に入る馬を当てる', emoji: '🏆' },
+              { label: '枠連', value: 'wakuren', description: '1着と2着になる枠を当てる（順不同）', emoji: '🔢' },
+              { label: '馬連', value: 'umaren', description: '1着と2着になる馬を当てる（順不同）', emoji: '🐎' },
+              { label: 'ワイド', value: 'wide', description: '3着以内に入る2頭の馬を当てる（順不同）', emoji: '📊' },
+              { label: '馬単', value: 'umatan', description: '1着と2着になる馬を当てる（順序通り）', emoji: '🎯' },
+              { label: '三連複', value: 'sanrenpuku', description: '1着から3着までの馬を当てる（順不同）', emoji: '🔄' },
+              { label: '三連単', value: 'sanrentan', description: '1着から3着までの馬を当てる（順序通り）', emoji: '💯' }
+            ])
+        );
+      components.push(betTypeRow);
+    }
 
     // 戻るボタン
     const backRow = new ActionRowBuilder()
       .addComponents(
         new ButtonBuilder()
-          .setCustomId(`races_back_${dateString}`)
+          .setCustomId(`races_back_${race.date}`)
           .setLabel('レース一覧に戻る')
           .setStyle(ButtonStyle.Secondary)
       );
+    components.push(backRow);
 
     await interaction.editReply({
-      content: `レース詳細と馬券購入画面です。馬券を購入するには、まず馬券の種類を選択してください。`,
+      content: showBetMenu ? 
+        `レース詳細と馬券購入画面です。馬券を購入するには、まず馬券の種類を選択してください。` : 
+        `レース詳細画面です。`,
       embeds: [raceEmbed],
-      components: [betTypeRow, backRow]
+      components: components
     });
-
   } catch (error) {
     logger.error(`レース詳細表示中にエラーが発生しました: ${error}`);
     await interaction.editReply({ content: '詳細の取得中にエラーが発生しました。' });
