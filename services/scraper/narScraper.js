@@ -85,13 +85,9 @@ export async function fetchNarRaceList(dateString = getTodayDateString()) {
     const { $ } = await fetchAndParse(url, `nar_${dateString}.html`);
     const races = [];
 
-    // HTMLの構造を確認
-    logger.debug(`NAR HTML構造: .RaceList_Box 要素の数: ${$('.RaceList_Box').length}`);
-
     // 競馬場ごとのレース情報を抽出
     $('.RaceList_Box').each((venueIndex, venueElement) => {
       const venueName = $(venueElement).find('.RaceList_DataTitle').text().trim().replace(/\s+/g, ' ');
-      logger.debug(`競馬場${venueIndex + 1}: ${venueName}`);
 
       $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
         const raceNumber = $(raceElement).find('.Race_Num').text().trim().replace(/\D/g, '');
@@ -114,15 +110,12 @@ export async function fetchNarRaceList(dateString = getTodayDateString()) {
         
         const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
 
-        logger.debug(`レース情報解析中: 番号=${raceNumber}, 時間=${raceTime}, 名前=${raceName}`);
-
         // レースIDを取得（URLから抽出）
         const raceLink = $(raceElement).find('a').attr('href');
         const raceIdMatch = raceLink ? raceLink.match(/race_id=([0-9]+)/) : null;
         const raceId = raceIdMatch ? raceIdMatch[1] : null;
 
         if (raceId) {
-          logger.debug(`レース情報: ${raceNumber}R ${raceName} (${raceTime}) ID:${raceId}`);
 
           // 検証済みのレース名と開催場所を使用
           const validatedVenue = cleanVenueName(venueName);
@@ -306,7 +299,6 @@ function extractNarPayout($, payoutTable, selector, targetArray, isMultiple = fa
   const elements = payoutTable.find(selector);
   
   if (elements.length === 0) {
-    logger.debug(`NAR: ${selector} の要素が見つかりません`);
     return;
   }
   
@@ -588,8 +580,6 @@ export async function fetchNarRaceResults(raceId) {
           }
         });
       } else {
-        // 通常のセレクタが失敗した場合、別の方法を試す
-        logger.debug(`通常のテーブル構造が見つかりませんでした。別の方法を試みます。`);
         
         // 馬名リンクから出走馬を取得する
         const horseLinks = $('.Horse_Name a, .HorseName a');
@@ -635,8 +625,6 @@ export async function fetchNarRaceResults(raceId) {
           });
         }
       }
-      
-      logger.debug(`レース ${raceId} の着順情報: ${results.length}件`);
       
       // 払戻情報の抽出（複数のセレクタを試行）
       const payoutSelectors = ['.Payout_Detail_Table', '.Payout'];

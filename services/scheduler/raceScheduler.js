@@ -120,7 +120,6 @@ async function checkRaceResults() {
     const activeRaces = await getActiveRaces();
     
     if (activeRaces.length === 0) {
-      logger.debug('現在開催中のレースはありません。');
       return;
     }
     

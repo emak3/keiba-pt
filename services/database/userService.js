@@ -33,8 +33,6 @@ export async function saveUser(userId, username, avatarUrl = null) {
       
       await updateDoc(userRef, updateData);
       
-      logger.debug(`ユーザー ${userId} (${username}) を更新しました。`);
-      
       return {
         id: userId,
         ...existingData,

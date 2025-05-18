@@ -42,7 +42,6 @@ async function fetchAndParse(url, debugFilename = null) {
 
             // 文字コードを検出
             const charset = detectCharset(response);
-            logger.debug(`検出された文字コード: ${charset}`);
 
             // 指定された文字コードでデコード
             const html = iconv.decode(Buffer.from(response.data), charset);
@@ -249,7 +248,6 @@ export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()
             const rawVenueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
             // 「○回○○○日目」の形式を保持しつつ整形
             const venueName = formatVenueName(rawVenueName);
-            logger.debug(`競馬場${venueIndex + 1}: ${venueName} (元: ${rawVenueName})`);
 
             // 各レースを処理
             $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
@@ -282,7 +280,6 @@ export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()
 
                 if (raceId) {
                     // レース情報をログ出力
-                    logger.debug(`レース情報: ${raceNumber}R ${raceName} (${raceTime}) ID:${raceId}`);
 
                     // レースIDからの会場コード検証 - JRAかどうか確認
                     const venueCode = extractVenueCodeFromRaceId(raceId);
@@ -313,7 +310,6 @@ export async function fetchJraRaceListEnhanced(dateString = getTodayDateString()
                     if (detectedVenueName && detectedVenueName !== '不明競馬場') {
                         // レースIDから抽出した会場名を優先（より信頼性が高い）
                         finalVenueName = detectedVenueName;
-                        logger.debug(`会場名をレースIDから検出された名前に更新: ${finalVenueName} (元:${venueName})`);
                     }
 
                     races.push({
@@ -367,7 +363,6 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
             const rawVenueName = $(venueElement).find('.RaceList_DataTitle').text().trim();
             // 「○回○○○日目」の形式を保持しつつ整形
             const venueName = formatVenueName(rawVenueName);
-            logger.debug(`競馬場${venueIndex + 1}: ${venueName} (元: ${rawVenueName})`);
 
             // 各レースを処理
             $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
@@ -399,9 +394,6 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
                 const raceId = raceIdMatch ? raceIdMatch[1] : null;
 
                 if (raceId) {
-                    // レース情報をログ出力
-                    logger.debug(`レース情報: ${raceNumber}R ${raceName} (${raceTime}) ID:${raceId}`);
-
                     // レースIDからの会場コード検証 - NARかどうか確認
                     const venueCode = extractVenueCodeFromRaceId(raceId);
                     const detectedType = determineRaceTypeFromVenueCode(venueCode);
@@ -431,7 +423,6 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
                     if (detectedVenueName && detectedVenueName !== '不明競馬場') {
                         // レースIDから抽出した会場名を優先（より信頼性が高い）
                         finalVenueName = detectedVenueName;
-                        logger.debug(`会場名をレースIDから検出された名前に更新: ${finalVenueName} (元:${venueName})`);
                     }
 
                     races.push({
@@ -625,13 +616,11 @@ export async function fetchJraHorsesEnhanced(raceId) {
                 const cancelCell = $(row).find('.Cancel_Txt');
                 if (cancelCell.length > 0 && cancelCell.text().trim() === '取消') {
                     isCanceled = true;
-                    logger.debug(`馬番${horseNumber}: 取消情報を検出しました (セル)`);
                 }
 
                 // 方法2: tr要素のクラスを確認
                 if ($(row).hasClass('Cancel')) {
                     isCanceled = true;
-                    logger.debug(`馬番${horseNumber}: 取消情報を検出しました (行)`);
                 }
 
                 // 馬番と馬名が有効な場合のみ配列に追加
@@ -734,13 +723,11 @@ export async function fetchNarHorsesEnhanced(raceId) {
                 const cancelCell = $(row).find('.Cancel_Txt');
                 if (cancelCell.length > 0 && cancelCell.text().trim() === '取消') {
                     isCanceled = true;
-                    logger.debug(`馬番${horseNumber}: 取消情報を検出しました (セル)`);
                 }
 
                 // 方法2: tr要素のクラスを確認
                 if ($(row).hasClass('Cancel')) {
                     isCanceled = true;
-                    logger.debug(`馬番${horseNumber}: 取消情報を検出しました (行)`);
                 }
 
                 // 馬番と馬名が有効な場合のみ配列に追加
@@ -778,14 +765,11 @@ export async function fetchNarHorsesEnhanced(raceId) {
 // デバッグ用の補助関数 - 行が少ない場合は直接すべての行と値を出力
 function debugAllRows($, selector) {
     const rows = $(selector);
-    logger.debug(`全${rows.length}行のデバッグ情報:`);
 
     rows.each((rowIndex, row) => {
-        logger.debug(`--- 行 ${rowIndex + 1} ---`);
         $(row).find('td').each((cellIndex, cell) => {
             const cellClass = $(cell).attr('class') || 'クラスなし';
             const cellText = $(cell).text().trim();
-            logger.debug(`Cell ${cellIndex + 1}: class="${cellClass}", text="${cellText}"`);
         });
     });
 }

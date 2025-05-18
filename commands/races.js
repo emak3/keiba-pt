@@ -416,45 +416,24 @@ export default {
               handleInteractionError(i, error);
             }
           }
-          // 馬券タイプ選択 (ここから馬券購入プロセスが始まるので、ベットコマンドに移譲)
+          // 馬券タイプ選択 (ここから馬券購入プロセスが始まるので、インタラクションハンドラーに移譲)
           else if (i.customId.startsWith('bet_select_type_')) {
             try {
-              // インタラクションを新しいコマンドに転送
-              const raceId = i.customId.split('_')[3];
-              
-              // bet コマンドを取得
-              const betCommand = interaction.client.commands.get('bet');
-              
-              if (betCommand) {
-                // bet コマンドにインタラクションを転送
-                const customInteraction = {
-                  ...i,
-                  options: {
-                    getString: (name) => {
-                      if (name === 'race_id') return raceId;
-                      if (name === 'type') return i.values[0];
-                      return null;
-                    },
-                    getInteger: (name) => {
-                      if (name === 'amount') return 100; // デフォルト金額
-                      return null;
-                    }
-                  }
-                };
-                
-                try {
-                  await i.deferUpdate();
-                } catch (deferError) {
-                  logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
-                }
-                
-                await betCommand.execute(customInteraction);
-              } else {
-                await i.reply({
-                  content: '馬券購入機能が見つかりませんでした。',
-                  ephemeral: true
-                });
+              // このインタラクションは interactionHandlers.js で処理するので、
+              // ここではデファーだけして処理を終了する
+              try {
+                await i.deferUpdate();
+              } catch (deferError) {
+                logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
               }
+              
+              // 必要であればメッセージを表示
+              await i.editReply({
+                content: '馬券購入処理に進みます...',
+                components: []
+              });
+              
+              // インタラクションハンドラーがこれ以降を処理
             } catch (error) {
               logger.error(`馬券タイプ選択処理エラー: ${error}`);
               handleInteractionError(i, error);

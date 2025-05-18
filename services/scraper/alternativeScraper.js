@@ -25,7 +25,6 @@ async function fetchAndParse(url, debugFileName) {
   
   // 文字コードを動的に検出
   const charset = detectCharset(response);
-  logger.debug(`検出された文字コード: ${charset}`);
 
   // レスポンスを検出された文字コードで変換
   const html = iconv.decode(Buffer.from(response.data), charset);
@@ -75,7 +74,6 @@ export async function fetchRaceCalendar(dateString = getTodayDateString()) {
     $('.Race_Calendar_List').each((i, element) => {
       // 日付を確認
       const dateText = $(element).find('.Race_Calendar_Date').text().trim();
-      logger.debug(`カレンダーの日付: ${dateText}`);
       
       // 開催場所を探す
       $(element).find('.Race_Calendar_Data a').each((j, venueEl) => {
@@ -84,10 +82,8 @@ export async function fetchRaceCalendar(dateString = getTodayDateString()) {
         
         if (venueUrl.includes('race.netkeiba.com')) {
           jraVenues.push(venueText);
-          logger.debug(`JRA開催場所: ${venueText}`);
         } else if (venueUrl.includes('nar.netkeiba.com')) {
           narVenues.push(venueText);
-          logger.debug(`NAR開催場所: ${venueText}`);
         }
       });
     });
@@ -125,13 +121,11 @@ export async function fetchJraRacesAlternative(dateString = getTodayDateString()
     const races = [];
     
     // レーステーブルを探す
-    logger.debug('JRAメインページからレース一覧を探しています...');
     
     // 競馬場情報を抽出
     $('.RaceList_Box').each((venueIdx, venueElement) => {
       // 競馬場名を取得
       const venueName = $(venueElement).find('.RaceList_DataTitle').text().trim().replace(/\s+/g, ' ');
-      logger.debug(`開催場: ${venueName}`);
       
       if (!venueName) {
         return; // 競馬場名がなければスキップ
@@ -168,11 +162,8 @@ export async function fetchJraRacesAlternative(dateString = getTodayDateString()
         // レース名を取得
         const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
         
-        logger.debug(`解析したレース情報: 番号=${raceNumber}, 時間=${raceTime}, 名前=${raceName}`);
-        
         // レースリンクとIDを取得
         const raceLink = $(raceElement).find('a').attr('href');
-        logger.debug(`レースリンク: ${raceLink}`);
         
         // レースIDを抽出
         const raceIdMatch = raceLink ? raceLink.match(/race_id=([0-9]+)/) : null;
@@ -228,18 +219,15 @@ export async function fetchNarRacesAlternative(dateString = getTodayDateString()
     const races = [];
     
     // レーステーブルを探す
-    logger.debug('NARメインページからレース一覧を探しています...');
     
     // 現在開催中のレースセクションを探す
     $('.RaceList_Data').each((venueIdx, venueElement) => {
       const venueName = $(venueElement).find('h3, .RaceList_DataTitle').text().trim();
-      logger.debug(`開催場: ${venueName}`);
       
       // 各レースを取得
       $(venueElement).find('.RaceList_DataItem, .RaceList_Item').each((raceIdx, raceElement) => {
         const raceInfo = $(raceElement).text().trim();
         const raceLink = $(raceElement).find('a').attr('href');
-        logger.debug(`レース情報: ${raceInfo}, リンク: ${raceLink}`);
         
         // レースIDを抽出
         const raceIdMatch = raceLink ? raceLink.match(/race_id=([0-9]+)/) : null;

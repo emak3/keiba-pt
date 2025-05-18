@@ -32,7 +32,6 @@ export async function saveJraRace(race) {
       // ステータスが completed なら更新しない
       const existingData = docSnap.data();
       if (existingData.status === 'completed') {
-        logger.debug(`レース ${race.id} は既に完了しているため更新をスキップします。`);
         return;
       }
       
@@ -41,7 +40,6 @@ export async function saveJraRace(race) {
         ...cleanedRace,
         updatedAt: new Date().toISOString()
       });
-      logger.debug(`JRA レース ${race.id} を更新しました。`);
     } else {
       // 新規にデータを保存
       await setDoc(raceRef, {
@@ -49,7 +47,6 @@ export async function saveJraRace(race) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
-      logger.debug(`JRA レース ${race.id} を新規作成しました。`);
     }
   } catch (error) {
     logger.error(`JRA レース保存中にエラーが発生しました: ${error}`);
@@ -81,7 +78,6 @@ export async function saveNarRace(race) {
       // ステータスが completed なら更新しない
       const existingData = docSnap.data();
       if (existingData.status === 'completed') {
-        logger.debug(`レース ${race.id} は既に完了しているため更新をスキップします。`);
         return;
       }
       
@@ -90,7 +86,6 @@ export async function saveNarRace(race) {
         ...cleanedRace,
         updatedAt: new Date().toISOString()
       });
-      logger.debug(`NAR レース ${race.id} を更新しました。`);
     } else {
       // 新規にデータを保存
       await setDoc(raceRef, {
@@ -98,7 +93,6 @@ export async function saveNarRace(race) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
-      logger.debug(`NAR レース ${race.id} を新規作成しました。`);
     }
   } catch (error) {
     logger.error(`NAR レース保存中にエラーが発生しました: ${error}`);
@@ -361,7 +355,6 @@ function processRaceStatus(raceData) {
   // 結果データがあれば、確実に completed に設定
   if (processedRace.results && processedRace.results.length > 0) {
     if (processedRace.status !== 'completed') {
-      logger.debug(`レース ${processedRace.id} は結果データがありますが、ステータスが ${processedRace.status} です。completed に更新します。`);
       processedRace.status = 'completed';
     }
     return processedRace;
@@ -387,19 +380,16 @@ function processRaceStatus(raceData) {
   if (now > afterRaceCompletion) {
     // レース後10分以上経過している場合は完了としてマーク
     if (processedRace.status !== 'completed') {
-      logger.debug(`レース ${processedRace.id} は発走時刻から10分以上経過しているため、ステータスを completed に更新します。`);
       processedRace.status = 'completed';
     }
   } else if (now > beforeRace && now < afterRace) {
     // 発走直前～レース中
     if (processedRace.status !== 'in_progress') {
-      logger.debug(`レース ${processedRace.id} は現在レース中のため、ステータスを in_progress に更新します。`);
       processedRace.status = 'in_progress';
     }
   } else if (now < beforeRace) {
     // 発走前
     if (processedRace.status !== 'upcoming') {
-      logger.debug(`レース ${processedRace.id} はまだ発走前のため、ステータスを upcoming に更新します。`);
       processedRace.status = 'upcoming';
     }
   }

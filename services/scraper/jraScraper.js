@@ -81,14 +81,10 @@ export async function fetchJraRaceList(dateString = getTodayDateString()) {
     const { $ } = await fetchAndParse(url, `jra_${dateString}.html`);
     const races = [];
 
-    // HTMLの構造を確認
-    logger.debug(`JRA HTML構造: .RaceList_Box 要素の数: ${$('.RaceList_Box').length}`);
-
     // 競馬場ごとのレース情報を抽出
     $('.RaceList_Box').each((venueIndex, venueElement) => {
       // JRAの場合は競馬場名が .RaceList_DataTitle に格納されている
       const venueName = $(venueElement).find('.RaceList_DataTitle').text().trim().replace(/\s+/g, ' ');
-      logger.debug(`競馬場${venueIndex + 1}: ${venueName}`);
 
       // JRAの場合はレースが .RaceList_DataItem に格納されている
       $(venueElement).find('.RaceList_DataItem').each((raceIndex, raceElement) => {
@@ -113,15 +109,12 @@ export async function fetchJraRaceList(dateString = getTodayDateString()) {
         // レース名を取得 - JRAはRaceList_ItemTitleの中にあるItemTitle
         const raceName = $(raceElement).find('.RaceList_ItemTitle .ItemTitle').text().trim();
 
-        logger.debug(`レース情報解析中: 番号=${raceNumber}, 時間=${raceTime}, 名前=${raceName}`);
-
         // レースIDを取得（URLから抽出）
         const raceLink = $(raceElement).find('a').attr('href');
         const raceIdMatch = raceLink ? raceLink.match(/race_id=([0-9]+)/) : null;
         const raceId = raceIdMatch ? raceIdMatch[1] : null;
 
         if (raceId) {
-          logger.debug(`レース情報: ${raceNumber}R ${raceName} (${raceTime}) ID:${raceId}`);
 
           // 検証済みのレース名と開催場所を使用（後方互換性のため、cleanVenueName, cleanRaceName を使用）
           const validatedVenue = cleanVenueName(venueName);
@@ -240,7 +233,6 @@ export async function fetchJraRaceResults(raceId) {
 
     // ネットケイバはEUC-JPを使用しているため、強制的に指定
     const charset = 'euc-jp';
-    logger.debug(`レスポンスの文字コードを ${charset} として処理します`);
 
     // レスポンスをUTF-8に変換
     const html = iconv.decode(Buffer.from(response.data), charset);
@@ -302,8 +294,6 @@ export async function fetchJraRaceResults(raceId) {
             logger.error(`着順情報の行解析中にエラー: ${rowError}`);
           }
         });
-
-        logger.debug(`レース ${raceId} の着順情報: ${results.length}件`);
       } catch (resultsError) {
         logger.error(`着順情報の取得中にエラー: ${resultsError}`);
       }

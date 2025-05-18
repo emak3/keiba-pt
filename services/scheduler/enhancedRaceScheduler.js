@@ -140,7 +140,6 @@ async function checkRaceResults() {
     const activeRaces = await getActiveRaces();
     
     if (activeRaces.length === 0) {
-      logger.debug('現在開催中のレースはありません。');
       return;
     }
     
@@ -310,8 +309,6 @@ async function updateHorsesInfo() {
             narUpdateCount++;
           }
         }
-        
-        logger.debug(`レース ${race.id} の出走馬情報を更新しました: ${horses.length}頭`);
         
         // 短い待機を入れて連続リクエストを避ける
         await new Promise(resolve => setTimeout(resolve, 500));
