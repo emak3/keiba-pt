@@ -488,9 +488,6 @@ export async function fetchJraRaceResults(raceId) {
  */
 function extractPayoutData($, selector, targetArray, numbersFinder, isMultiple = false) {
   try {
-    // デバッグ情報
-    console.log(`払戻情報抽出: ${selector} の処理を開始`);
-    
     // 複数のセレクタを試す
     const elements = $(`.Payout_Detail_Table ${selector}, .Race_Payoff_Table ${selector}, .Payout ${selector}`);
     

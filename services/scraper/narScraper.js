@@ -297,9 +297,6 @@ export async function fetchNarRaceEntries(raceId) {
  */
 function extractNarPayout($, payoutTable, selector, targetArray, isMultiple = false) {
   try {
-    // デバッグ情報
-    console.log(`NAR払戻情報抽出: ${selector} の処理を開始`);
-
     const elements = payoutTable.find(selector);
 
     if (elements.length === 0) {
