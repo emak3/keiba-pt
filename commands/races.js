@@ -1,4 +1,4 @@
-// commands/races.js
+// commands/races.js - 修正版（インタラクションエラー修正）
 import {
   MessageFlags,
   SlashCommandBuilder, 
@@ -251,7 +251,7 @@ export default {
         try {
           if (i.customId.startsWith('races_prev_') || i.customId.startsWith('races_next_')) {
             // 日付移動の処理
-            await handleDateNavigation(i, interaction, history);
+            await handleDateNavigation(i, history);
           }
           // 会場選択
           else if (i.customId.startsWith('races_select_venue_')) {
@@ -259,7 +259,7 @@ export default {
           }
           // 戻るボタン
           else if (i.customId.startsWith('races_back_')) {
-            await handleBackButton(i, interaction, history);
+            await handleBackButton(i, history);
           }
           // レース選択
           else if (i.customId.startsWith('races_select_race_')) {
@@ -286,51 +286,161 @@ export default {
 /**
  * 日付ナビゲーション処理
  * @param {MessageComponentInteraction} interaction - インタラクション
- * @param {CommandInteraction} originalInteraction - 元のコマンドインタラクション
  * @param {Object} history - ナビゲーション履歴
  */
-async function handleDateNavigation(interaction, originalInteraction, history) {
-  const newDate = interaction.customId.split('_')[2];
-  history.previousStates.push({
-    date: history.currentDate,
-    venue: null // 全体表示に戻る
-  });
-  history.currentDate = newDate;
-
+async function handleDateNavigation(interaction, history) {
   try {
-    await interaction.deferUpdate();
-  } catch (deferError) {
-    logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
-  }
+    const newDate = interaction.customId.split('_')[2];
+    history.previousStates.push({
+      date: history.currentDate,
+      venue: null // 全体表示に戻る
+    });
+    history.currentDate = newDate;
 
-  try {
-    await interaction.editReply({ content: '読み込み中...', embeds: [], components: [] });
-  } catch (editError) {
-    logger.warn(`editReply エラー (無視して続行): ${editError}`);
-  }
+    // すでに応答済みかもしれないので、エラー処理を追加
+    try {
+      await interaction.deferUpdate();
+    } catch (deferError) {
+      logger.warn(`deferUpdate エラー (無視して続行): ${deferError}`);
+    }
 
-  // 新しい日付でコマンドを再実行
-  const command = originalInteraction.client.commands.get('races');
-  const newInteraction = {
-    ...originalInteraction,
-    options: {
-      getString: () => newDate
-    },
-    editReply: async (options) => {
-      try {
-        return await interaction.editReply(options);
-      } catch (editError) {
-        logger.error(`編集エラー: ${editError}`);
-        try {
-          return await interaction.followUp({ ...options, ephemeral: false });
-        } catch (followupError) {
-          logger.error(`フォローアップエラー: ${followupError}`);
-        }
+    // 新しい日付の表示用フォーマット
+    const displayDate = `${newDate.slice(0, 4)}年${newDate.slice(4, 6)}月${newDate.slice(6, 8)}日`;
+    
+    try {
+      await interaction.editReply({ content: `${displayDate}のレース情報を取得中...`, embeds: [], components: [] });
+    } catch (editError) {
+      logger.warn(`editReply エラー (無視して続行): ${editError}`);
+    }
+
+    // レース一覧を取得
+    const races = await getRacesByDate(newDate);
+
+    if (races.length === 0) {
+      await safeEditReply(interaction, { 
+        content: `${displayDate}のレース情報はありません。`,
+        embeds: [],
+        components: []
+      });
+      return;
+    }
+
+    // 会場コード別にレースをグループ化
+    const venueGroups = groupRacesByVenueCode(races);
+
+    // 会場リストを作成（JRAとNARで分類）
+    const jraVenues = [];
+    const narVenues = [];
+
+    for (const venueCode in venueGroups) {
+      const firstRace = venueGroups[venueCode][0];
+      // 会場名を整形
+      const venueName = cleanVenueName(firstRace.venue);
+
+      // 会場コードが1-10ならJRA、それ以外はNAR
+      if (parseInt(venueCode) >= 1 && parseInt(venueCode) <= 10) {
+        jraVenues.push({
+          code: venueCode,
+          name: venueCodeMap[venueCode] || venueName,
+          type: 'JRA'
+        });
+      } else {
+        narVenues.push({
+          code: venueCode,
+          name: venueCodeMap[venueCode] || venueName,
+          type: 'NAR'
+        });
       }
     }
-  };
 
-  await command.execute(newInteraction);
+    // 会場選択用のセレクトメニュー
+    const selectRow = new ActionRowBuilder()
+      .addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`races_select_venue_${newDate}`)
+          .setPlaceholder('会場を選択してください')
+          .addOptions([
+            ...jraVenues.map(venue => ({
+              label: `${venue.name}（JRA）`,
+              value: `${venue.code}_${newDate}`,
+              description: `${venue.name}競馬場のレース一覧`,
+              emoji: '🏇'
+            })),
+            ...narVenues.map(venue => ({
+              label: `${venue.name}（NAR）`,
+              value: `${venue.code}_${newDate}`,
+              description: `${venue.name}競馬場のレース一覧`,
+              emoji: '🐎'
+            }))
+          ])
+      );
+
+    // 前日・翌日ボタン
+    const prevDate = dayjs(newDate).subtract(1, 'day').format('YYYYMMDD');
+    const nextDate = dayjs(newDate).add(1, 'day').format('YYYYMMDD');
+
+    const navigationRow = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(`races_prev_${prevDate}`)
+          .setLabel('前日')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`races_next_${nextDate}`)
+          .setLabel('翌日')
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+    // JRAとNARの会場数
+    const jraCount = jraVenues.length;
+    const narCount = narVenues.length;
+
+    // 会場一覧のエンベッド
+    const venueListEmbed = new EmbedBuilder()
+      .setTitle(`${displayDate}の開催会場一覧`)
+      .setColor(0x00b0f4)
+      .setTimestamp();
+
+    let description = '';
+
+    if (jraCount > 0) {
+      description += `**◆ 中央競馬（JRA）：${jraCount}会場**\n`;
+      jraVenues.forEach(venue => {
+        const raceCount = venueGroups[venue.code].length;
+        description += `・${venue.name}（${raceCount}レース）\n`;
+      });
+      description += '\n';
+    }
+
+    if (narCount > 0) {
+      description += `**◆ 地方競馬（NAR）：${narCount}会場**\n`;
+      narVenues.forEach(venue => {
+        const raceCount = venueGroups[venue.code].length;
+        description += `・${venue.name}（${raceCount}レース）\n`;
+      });
+    }
+
+    if (jraCount === 0 && narCount === 0) {
+      description += '開催会場情報が取得できませんでした。\n';
+    }
+
+    description += '\n下のメニューから会場を選択してください。';
+    venueListEmbed.setDescription(description);
+
+    // レスポンスを送信
+    await safeEditReply(interaction, {
+      content: `${displayDate}のレース一覧（${races.length}件）`,
+      embeds: [venueListEmbed],
+      components: [selectRow, navigationRow]
+    });
+  } catch (error) {
+    logger.error(`日付移動処理中にエラー: ${error}`);
+    await safeEditReply(interaction, {
+      content: 'レース情報の取得中にエラーが発生しました。もう一度お試しください。',
+      embeds: [],
+      components: []
+    });
+  }
 }
 
 /**
@@ -363,10 +473,9 @@ async function handleVenueSelection(interaction, history) {
 /**
  * 戻るボタン処理
  * @param {MessageComponentInteraction} interaction - インタラクション
- * @param {CommandInteraction} originalInteraction - 元のコマンドインタラクション
  * @param {Object} history - ナビゲーション履歴
  */
-async function handleBackButton(interaction, originalInteraction, history) {
+async function handleBackButton(interaction, history) {
   if (history.previousStates.length > 0) {
     const previousState = history.previousStates.pop();
 
@@ -388,37 +497,143 @@ async function handleBackButton(interaction, originalInteraction, history) {
         logger.warn(`戻る中間メッセージエラー: ${editError}`);
       }
 
-      const command = originalInteraction.client.commands.get('races');
-      const newInteraction = {
-        ...originalInteraction,
-        options: {
-          getString: () => previousState.date
-        },
-        editReply: async (options) => {
-          try {
-            return await interaction.editReply(options);
-          } catch (editError) {
-            logger.error(`編集エラー: ${editError}`);
-            try {
-              return await interaction.followUp({ ...options, ephemeral: false });
-            } catch (followupError) {
-              logger.error(`フォローアップエラー: ${followupError}`);
-            }
-          }
-        }
-      };
+      // 新しい日付の表示用フォーマット
+      const date = previousState.date;
+      const displayDate = `${date.slice(0, 4)}年${date.slice(4, 6)}月${date.slice(6, 8)}日`;
 
-      await command.execute(newInteraction);
+      // レース一覧を取得
+      const races = await getRacesByDate(date);
+
+      if (races.length === 0) {
+        await safeEditReply(interaction, { 
+          content: `${displayDate}のレース情報はありません。`,
+          embeds: [],
+          components: []
+        });
+        return;
+      }
+
+      // 会場コード別にレースをグループ化
+      const venueGroups = groupRacesByVenueCode(races);
+
+      // 会場リストを作成（JRAとNARで分類）
+      const jraVenues = [];
+      const narVenues = [];
+
+      for (const venueCode in venueGroups) {
+        const firstRace = venueGroups[venueCode][0];
+        // 会場名を整形
+        const venueName = cleanVenueName(firstRace.venue);
+
+        // 会場コードが1-10ならJRA、それ以外はNAR
+        if (parseInt(venueCode) >= 1 && parseInt(venueCode) <= 10) {
+          jraVenues.push({
+            code: venueCode,
+            name: venueCodeMap[venueCode] || venueName,
+            type: 'JRA'
+          });
+        } else {
+          narVenues.push({
+            code: venueCode,
+            name: venueCodeMap[venueCode] || venueName,
+            type: 'NAR'
+          });
+        }
+      }
+
+      // 会場選択用のセレクトメニュー
+      const selectRow = new ActionRowBuilder()
+        .addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(`races_select_venue_${date}`)
+            .setPlaceholder('会場を選択してください')
+            .addOptions([
+              ...jraVenues.map(venue => ({
+                label: `${venue.name}（JRA）`,
+                value: `${venue.code}_${date}`,
+                description: `${venue.name}競馬場のレース一覧`,
+                emoji: '🏇'
+              })),
+              ...narVenues.map(venue => ({
+                label: `${venue.name}（NAR）`,
+                value: `${venue.code}_${date}`,
+                description: `${venue.name}競馬場のレース一覧`,
+                emoji: '🐎'
+              }))
+            ])
+        );
+
+      // 前日・翌日ボタン
+      const prevDate = dayjs(date).subtract(1, 'day').format('YYYYMMDD');
+      const nextDate = dayjs(date).add(1, 'day').format('YYYYMMDD');
+
+      const navigationRow = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`races_prev_${prevDate}`)
+            .setLabel('前日')
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId(`races_next_${nextDate}`)
+            .setLabel('翌日')
+            .setStyle(ButtonStyle.Secondary)
+        );
+
+      // JRAとNARの会場数
+      const jraCount = jraVenues.length;
+      const narCount = narVenues.length;
+
+      // 会場一覧のエンベッド
+      const venueListEmbed = new EmbedBuilder()
+        .setTitle(`${displayDate}の開催会場一覧`)
+        .setColor(0x00b0f4)
+        .setTimestamp();
+
+      let description = '';
+
+      if (jraCount > 0) {
+        description += `**◆ 中央競馬（JRA）：${jraCount}会場**\n`;
+        jraVenues.forEach(venue => {
+          const raceCount = venueGroups[venue.code].length;
+          description += `・${venue.name}（${raceCount}レース）\n`;
+        });
+        description += '\n';
+      }
+
+      if (narCount > 0) {
+        description += `**◆ 地方競馬（NAR）：${narCount}会場**\n`;
+        narVenues.forEach(venue => {
+          const raceCount = venueGroups[venue.code].length;
+          description += `・${venue.name}（${raceCount}レース）\n`;
+        });
+      }
+
+      if (jraCount === 0 && narCount === 0) {
+        description += '開催会場情報が取得できませんでした。\n';
+      }
+
+      description += '\n下のメニューから会場を選択してください。';
+      venueListEmbed.setDescription(description);
+
+      // レスポンスを送信
+      await safeEditReply(interaction, {
+        content: `${displayDate}のレース一覧（${races.length}件）`,
+        embeds: [venueListEmbed],
+        components: [selectRow, navigationRow]
+      });
     }
   } else {
     try {
-      await interaction.update({ content: '前の画面に戻れません。' });
-    } catch (updateError) {
-      logger.warn(`履歴なしエラー (次の処理にフォールバック): ${updateError}`);
+      await interaction.reply({ 
+        content: '前の画面に戻れません。', 
+        flags: MessageFlags.Ephemeral 
+      });
+    } catch (replyError) {
+      logger.warn(`戻るボタン応答エラー: ${replyError}`);
       try {
-        await interaction.editReply({ content: '前の画面に戻れません。' });
-      } catch (editError) {
-        logger.error(`履歴なしエラー編集失敗: ${editError}`);
+        await interaction.update({ content: '前の画面に戻れません。' });
+      } catch (updateError) {
+        logger.warn(`戻るボタンアップデートエラー: ${updateError}`);
       }
     }
   }
@@ -440,7 +655,7 @@ async function handleRaceSelection(interaction, history) {
 
   if (!raceId) {
     logger.error('レース選択: レースIDが取得できませんでした');
-    await interaction.editReply({
+    await safeEditReply(interaction, {
       content: 'レース情報の取得に失敗しました。もう一度お試しください。',
       components: []
     });
@@ -470,6 +685,7 @@ async function handleRaceSelection(interaction, history) {
  */
 async function handleInteractionError(interaction, error) {
   try {
+    // インタラクションの状態に応じた適切なエラー処理
     if (interaction.replied) {
       await interaction.followUp({
         content: 'エラーが発生しました。もう一度操作をお試しください。',
@@ -480,22 +696,12 @@ async function handleInteractionError(interaction, error) {
         content: 'エラーが発生しました。もう一度操作をお試しください。',
       });
     } else {
-      if (typeof interaction.update === 'function') {
-        try {
-          await interaction.update({
-            content: 'エラーが発生しました。もう一度操作をお試しください。',
-          });
-        } catch (updateError) {
-          try {
-            await interaction.reply({
-              content: 'エラーが発生しました。もう一度操作をお試しください。',
-              flags: MessageFlags.Ephemeral
-            });
-          } catch (replyError) {
-            logger.error(`応答失敗: ${replyError}`);
-          }
-        }
-      } else {
+      try {
+        await interaction.deferUpdate();
+        await interaction.editReply({
+          content: 'エラーが発生しました。もう一度操作をお試しください。',
+        });
+      } catch (updateError) {
         try {
           await interaction.reply({
             content: 'エラーが発生しました。もう一度操作をお試しください。',
@@ -508,6 +714,27 @@ async function handleInteractionError(interaction, error) {
     }
   } catch (responseError) {
     logger.error(`エラー通知中の二次エラー: ${responseError}`);
+  }
+}
+
+/**
+ * 安全なeditReply関数 - エラーハンドリング付き
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ * @param {Object} options - 編集オプション
+ */
+async function safeEditReply(interaction, options) {
+  try {
+    await interaction.editReply(options);
+  } catch (editError) {
+    logger.error(`editReply エラー: ${editError}`);
+    try {
+      await interaction.followUp({
+        ...options,
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (followUpError) {
+      logger.error(`followUp エラー: ${followUpError}`);
+    }
   }
 }
 
@@ -588,7 +815,7 @@ async function displayVenueRaces(interaction, venueCode, dateString, allRaces) {
 
     // レースが見つからない場合
     if (venueRaces.length === 0) {
-      return await interaction.editReply({
+      return await safeEditReply(interaction, {
         content: `選択された会場のレース情報が見つかりませんでした。`,
         embeds: [],
         components: []
@@ -671,29 +898,18 @@ async function displayVenueRaces(interaction, venueCode, dateString, allRaces) {
       );
 
     // レスポンスを更新
-    try {
-      await interaction.editReply({
-        content: `${displayDate} ${venueName}${roundInfo}（${venueType}）のレース一覧（${venueRaces.length}件）\nレースを選択して馬券を購入できます。`,
-        embeds: [raceListEmbed],
-        components: [raceSelectRow, backRow, navigationRow]
-      });
-    } catch (editError) {
-      logger.error(`レスポンス更新エラー: ${editError}`);
-      // フォールバックとしてフォローアップを試す
-      try {
-        await interaction.followUp({
-          content: `${displayDate} ${venueName}${roundInfo}（${venueType}）のレース一覧（${venueRaces.length}件）\nレースを選択して馬券を購入できます。`,
-          embeds: [raceListEmbed],
-          components: [raceSelectRow, backRow, navigationRow],
-          ephemeral: false
-        });
-      } catch (followUpError) {
-        logger.error(`フォローアップ更新もエラー: ${followUpError}`);
-      }
-    }
+    await safeEditReply(interaction, {
+      content: `${displayDate} ${venueName}${roundInfo}（${venueType}）のレース一覧（${venueRaces.length}件）\nレースを選択して馬券を購入できます。`,
+      embeds: [raceListEmbed],
+      components: [raceSelectRow, backRow, navigationRow]
+    });
   } catch (error) {
     logger.error(`会場別レース一覧表示中にエラーが発生しました: ${error}`);
-    throw error;
+    await safeEditReply(interaction, {
+      content: 'レース情報の表示中にエラーが発生しました。もう一度お試しください。',
+      embeds: [],
+      components: []
+    });
   }
 }
 
@@ -709,7 +925,7 @@ async function displayRaceDetail(interaction, raceId, showBetMenu = false) {
     const race = await getRaceById(raceId);
 
     if (!race) {
-      return await interaction.editReply({
+      return await safeEditReply(interaction, {
         content: `レースID ${raceId} の情報が見つかりませんでした。`,
         embeds: [],
         components: []
@@ -718,7 +934,7 @@ async function displayRaceDetail(interaction, raceId, showBetMenu = false) {
 
     // レースステータスチェック
     if (race.status === 'completed') {
-      return await interaction.editReply({
+      return await safeEditReply(interaction, {
         content: `このレースは既に終了しています。結果は \`/result ${raceId}\` で確認できます。`,
         embeds: [],
         components: []
@@ -738,7 +954,7 @@ async function displayRaceDetail(interaction, raceId, showBetMenu = false) {
     const twoMinutesBefore = new Date(raceTime.getTime() - 2 * 60 * 1000);
 
     if (now > twoMinutesBefore) {
-      return await interaction.editReply({
+      return await safeEditReply(interaction, {
         content: `このレースは発走2分前を過ぎているため、馬券を購入できません。`,
         embeds: [],
         components: []
@@ -826,7 +1042,7 @@ async function displayRaceDetail(interaction, raceId, showBetMenu = false) {
       );
     components.push(backRow);
 
-    await interaction.editReply({
+    await safeEditReply(interaction, {
       content: showBetMenu ? 
         `レース詳細と馬券購入画面です。馬券を購入するには、まず馬券の種類を選択してください。` : 
         `レース詳細画面です。`,
@@ -835,7 +1051,11 @@ async function displayRaceDetail(interaction, raceId, showBetMenu = false) {
     });
   } catch (error) {
     logger.error(`レース詳細表示中にエラーが発生しました: ${error}`);
-    await interaction.editReply({ content: '詳細の取得中にエラーが発生しました。' });
+    await safeEditReply(interaction, { 
+      content: '詳細の取得中にエラーが発生しました。', 
+      embeds: [], 
+      components: [] 
+    });
   }
 }
 
