@@ -178,7 +178,7 @@ async function checkRaceResults() {
                 const channel = await client.channels.fetch(notificationChannel);
                 if (channel) {
                   await channel.send({
-                    content: `🏁 **レース結果確定**\n${race.venue} ${race.number}R ${race.name}\n\n結果と払戻金の確認は \`/result ${race.id}\` で行えます。`
+                    content: `🏁 **レース結果確定**\n${race.venue} ${race.number}R ${race.name}\n\n結果と払戻金の確認は \`/result race_id: ${race.id}\` で行えます。`
                   });
                 }
               } catch (notifyError) {
