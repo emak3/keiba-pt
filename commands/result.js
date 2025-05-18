@@ -42,8 +42,11 @@ export default {
         return await interaction.editReply(`このレースはまだ終了していません。\n\n${race.venue} ${race.number}R ${race.name}\n発走時刻: ${race.date.slice(0, 4)}/${race.date.slice(4, 6)}/${race.date.slice(6, 8)} ${race.time}`);
       }
       
-      // 結果情報がない場合
-      if (!race.results || race.results.length === 0 || !race.payouts) {
+      // 結果情報の有無をより厳密にチェック
+      const hasResults = race.results && race.results.length > 0;
+      const hasPayouts = race.payouts && Object.values(race.payouts).some(arr => arr && arr.length > 0);
+      
+      if (!hasResults && !hasPayouts) {
         return await interaction.editReply(`レース ${race.id} の結果情報がまだ利用できません。しばらく経ってからもう一度お試しください。`);
       }
       
@@ -59,13 +62,19 @@ export default {
         .setTimestamp();
       
       // 着順情報
-      let resultText = '**【着順】**\n';
+      let resultText = '';
       
-      const sortedResults = [...race.results].sort((a, b) => a.order - b.order);
-      
-      sortedResults.slice(0, 5).forEach(result => {
-        resultText += `${result.order}着: ${result.frameNumber}枠 ${result.horseNumber}番 ${result.horseName} (${result.jockey})\n`;
-      });
+      if (hasResults) {
+        resultText = '**【着順】**\n';
+        
+        const sortedResults = [...race.results].sort((a, b) => a.order - b.order);
+        
+        sortedResults.slice(0, 5).forEach(result => {
+          resultText += `${result.order}着: ${result.frameNumber}枠 ${result.horseNumber}番 ${result.horseName} (${result.jockey})\n`;
+        });
+      } else {
+        resultText = '**【着順情報】**\n着順情報はまだ利用できません。';
+      }
       
       resultEmbed.addFields({ name: '結果', value: resultText });
       
@@ -79,13 +88,13 @@ export default {
       let payoutText = '';
       
       // 単勝
-      if (race.payouts.tansho && race.payouts.tansho.length > 0) {
+      if (race.payouts?.tansho && race.payouts.tansho.length > 0) {
         const tansho = race.payouts.tansho[0];
         payoutText += `**単勝**: ${tansho.numbers.join('-')} (${tansho.popularity}人気) → ${tansho.payout}円\n\n`;
       }
       
       // 複勝
-      if (race.payouts.fukusho && race.payouts.fukusho.length > 0) {
+      if (race.payouts?.fukusho && race.payouts.fukusho.length > 0) {
         payoutText += '**複勝**: ';
         race.payouts.fukusho.forEach((fukusho, index) => {
           payoutText += `${fukusho.numbers.join('-')} (${fukusho.popularity}人気) → ${fukusho.payout}円`;
@@ -97,22 +106,24 @@ export default {
       }
       
       // 枠連
-      if (race.payouts.wakuren && race.payouts.wakuren.length > 0) {
+      if (race.payouts?.wakuren && race.payouts.wakuren.length > 0) {
         const wakuren = race.payouts.wakuren[0];
         payoutText += `**枠連**: ${wakuren.numbers.join('-')} (${wakuren.popularity}人気) → ${wakuren.payout}円\n\n`;
       }
       
       // 馬連
-      if (race.payouts.umaren && race.payouts.umaren.length > 0) {
+      if (race.payouts?.umaren && race.payouts.umaren.length > 0) {
         const umaren = race.payouts.umaren[0];
         payoutText += `**馬連**: ${umaren.numbers.join('-')} (${umaren.popularity}人気) → ${umaren.payout}円\n\n`;
       }
       
-      // ワイド
-      if (race.payouts.wide && race.payouts.wide.length > 0) {
+      // ワイド - 修正: 各組み合わせごとに正しく表示
+      if (race.payouts?.wide && race.payouts.wide.length > 0) {
         payoutText += '**ワイド**: ';
         race.payouts.wide.forEach((wide, index) => {
-          payoutText += `${wide.numbers.join('-')} (${wide.popularity}人気) → ${wide.payout}円`;
+          // 修正: 馬番が配列であることを確認し、正しく整形
+          const horseNumbers = Array.isArray(wide.numbers) ? wide.numbers : [];
+          payoutText += `${horseNumbers.join('-')} (${wide.popularity}人気) → ${wide.payout}円`;
           if (index < race.payouts.wide.length - 1) {
             payoutText += ' / ';
           }
@@ -121,21 +132,28 @@ export default {
       }
       
       // 馬単
-      if (race.payouts.umatan && race.payouts.umatan.length > 0) {
+      if (race.payouts?.umatan && race.payouts.umatan.length > 0) {
         const umatan = race.payouts.umatan[0];
+        // 馬単は矢印でつなぐ
         payoutText += `**馬単**: ${umatan.numbers.join('→')} (${umatan.popularity}人気) → ${umatan.payout}円\n\n`;
       }
       
       // 三連複
-      if (race.payouts.sanrenpuku && race.payouts.sanrenpuku.length > 0) {
+      if (race.payouts?.sanrenpuku && race.payouts.sanrenpuku.length > 0) {
         const sanrenpuku = race.payouts.sanrenpuku[0];
         payoutText += `**三連複**: ${sanrenpuku.numbers.join('-')} (${sanrenpuku.popularity}人気) → ${sanrenpuku.payout}円\n\n`;
       }
       
       // 三連単
-      if (race.payouts.sanrentan && race.payouts.sanrentan.length > 0) {
+      if (race.payouts?.sanrentan && race.payouts.sanrentan.length > 0) {
         const sanrentan = race.payouts.sanrentan[0];
+        // 三連単は矢印でつなぐ
         payoutText += `**三連単**: ${sanrentan.numbers.join('→')} (${sanrentan.popularity}人気) → ${sanrentan.payout}円`;
+      }
+      
+      // 払戻情報がない場合
+      if (!payoutText) {
+        payoutText = '払戻情報はまだ利用できません。';
       }
       
       payoutEmbed.setDescription(payoutText);

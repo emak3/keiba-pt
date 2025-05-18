@@ -18,11 +18,19 @@ import {
   saveNarRace, 
   updateJraRaceResult, 
   updateNarRaceResult,
-  getRaceById
+  getRaceById,
+  getUnprocessedRaces  // 追加: 未処理レースを取得する関数をインポート
 } from '../database/raceService.js';
 import logger from '../../utils/logger.js';
 
 let client = null;
+
+// 追加: 結果取得用の定数
+const RESULT_CHECK_MINUTES = 15; // 発走後15分後に結果を取得
+const MAX_RETRY_COUNT = 3;      // 最大再試行回数
+
+// 追加: 再試行待ちのレースを保持する配列
+let pendingRaces = [];
 
 /**
  * 強化版レーススケジューラーを開始
@@ -44,12 +52,17 @@ export function startEnhancedRaceScheduler(discordClient) {
   
   // 定期的に出走馬情報を更新 - 3時間ごと
   new CronJob('0 0 */3 * * *', updateHorsesInfo, null, true, 'Asia/Tokyo');
+
+  // 追加: 未処理レースの再確認 - 30分ごと
+  new CronJob('0 */30 * * * *', recheckPendingRaces, null, true, 'Asia/Tokyo');
   
   // 起動時に1回実行
   fetchDailyRaces();
   checkRaceResults();
   // 5分後に出走馬情報を更新
   setTimeout(updateHorsesInfo, 5 * 60 * 1000);
+  // 追加: 15分後に未処理レースを確認
+  setTimeout(recheckPendingRaces, 15 * 60 * 1000);
 }
 
 /**
@@ -157,9 +170,9 @@ async function checkRaceResults() {
           'YYYY-MM-DD HH:mm'
         );
         
-        // レース終了から5分以上経過しているか
-        // 通常のレースは2-3分程度で終わるため、余裕を持って5分後に結果を取得
-        const endTime = raceDate.add(5, 'minute');
+        // 修正: レース終了から15分以上経過しているか
+        // 通常のレースは2-3分程度で終わるため、発走から15分後に結果を取得
+        const endTime = raceDate.add(RESULT_CHECK_MINUTES, 'minute');
         
         if (now.isAfter(endTime)) {
           logger.info(`レース ${race.id} (${race.name}) の結果を取得します。`);
@@ -169,45 +182,40 @@ async function checkRaceResults() {
           try {
             if (race.type === 'jra') {
               resultData = await fetchJraRaceResults(race.id);
-              if (resultData) {
+              if (resultData && (resultData.results.length > 0 || Object.values(resultData.payouts).some(arr => arr.length > 0))) {
                 await updateJraRaceResult(race.id, resultData);
                 logger.info(`レース ${race.id} のステータスを completed に更新しました。`);
+                
+                // 結果通知
+                await notifyRaceResult(race);
+                
               } else {
-                logger.warn(`レース ${race.id} の結果データが取得できませんでした。まだ終了していない可能性があります。`);
+                // 修正: 結果が取得できなかった場合は保留リストに追加
+                logger.warn(`レース ${race.id} の結果データが取得できませんでした。保留リストに追加します。`);
+                addToPendingRaces(race);
               }
             } else if (race.type === 'nar') {
               resultData = await fetchNarRaceResults(race.id);
-              if (resultData) {
+              if (resultData && (resultData.results.length > 0 || Object.values(resultData.payouts).some(arr => arr.length > 0))) {
                 await updateNarRaceResult(race.id, resultData);
                 logger.info(`レース ${race.id} のステータスを completed に更新しました。`);
+                
+                // 結果通知
+                await notifyRaceResult(race);
+                
               } else {
-                logger.warn(`レース ${race.id} の結果データが取得できませんでした。まだ終了していない可能性があります。`);
+                // 修正: 結果が取得できなかった場合は保留リストに追加
+                logger.warn(`レース ${race.id} の結果データが取得できませんでした。保留リストに追加します。`);
+                addToPendingRaces(race);
               }
             }
           } catch (resultError) {
             logger.error(`レース ${race.id} の結果処理中にエラーが発生しました: ${resultError}`);
-            // エラーがあっても続行
-            resultData = null;
-          }
-          
-          // 結果が取得できた場合のみ通知
-          if (resultData && client) {
-            const notificationChannel = process.env.NOTIFICATION_CHANNEL_ID;
-            if (notificationChannel) {
-              try {
-                const channel = await client.channels.fetch(notificationChannel);
-                if (channel) {
-                  await channel.send({
-                    content: `🏁 **レース結果確定**\n${race.venue} ${race.number}R ${race.name}\n\n結果と払戻金の確認は \`/result ${race.id}\` で行えます。`
-                  });
-                }
-              } catch (notifyError) {
-                logger.error(`通知送信中にエラー: ${notifyError}`);
-              }
-            }
+            // エラーがあった場合も保留リストに追加
+            addToPendingRaces(race);
           }
         } else {
-          logger.debug(`レース ${race.id} はまだ終了時間を過ぎていません。(現在: ${now.format('HH:mm')}, 終了予定: ${endTime.format('HH:mm')})`);
+          logger.debug(`レース ${race.id} はまだ終了時間を過ぎていません。(現在: ${now.format('HH:mm')}, 結果取得予定: ${endTime.format('HH:mm')})`);
         }
       } catch (raceError) {
         logger.error(`レース ${race.id} の結果取得中にエラーが発生しました: ${raceError}`);
@@ -216,6 +224,175 @@ async function checkRaceResults() {
     }
   } catch (error) {
     logger.error(`レース結果確認中にエラーが発生しました: ${error}`);
+  }
+}
+
+/**
+ * 保留中のレースを再チェック
+ */
+async function recheckPendingRaces() {
+  try {
+    if (pendingRaces.length === 0) {
+      // 追加: データベースからも未処理レースを検索
+      const today = dayjs().format('YYYYMMDD');
+      const unprocessedRaces = await getUnprocessedRaces(today);
+      
+      if (unprocessedRaces.length > 0) {
+        logger.info(`データベースから未処理レース ${unprocessedRaces.length}件を取得しました。`);
+        
+        // 現在時刻
+        const now = dayjs();
+        
+        // 発走時刻から15分以上経過しているレースのみを保留リストに追加
+        for (const race of unprocessedRaces) {
+          const raceDate = dayjs(
+            `${race.date.slice(0, 4)}-${race.date.slice(4, 6)}-${race.date.slice(6, 8)} ${race.time}`,
+            'YYYY-MM-DD HH:mm'
+          );
+          
+          const endTime = raceDate.add(RESULT_CHECK_MINUTES, 'minute');
+          
+          if (now.isAfter(endTime)) {
+            addToPendingRaces(race);
+          }
+        }
+      }
+      
+      if (pendingRaces.length === 0) {
+        return; // 保留レースがなければ終了
+      }
+    }
+    
+    logger.info(`保留中のレース ${pendingRaces.length}件を再チェックします。`);
+    
+    // 保留リストのコピーを作成（処理中に配列が変わるのを防ぐ）
+    const racesToCheck = [...pendingRaces];
+    
+    // 保留リストをクリア（処理中に新しい保留レースが追加される可能性があるため）
+    pendingRaces = [];
+    
+    // 各保留レースを処理
+    for (const pendingRace of racesToCheck) {
+      try {
+        // 最新のレース情報を取得（ステータスが変わっている可能性があるため）
+        const race = await getRaceById(pendingRace.id);
+        
+        // すでに完了している場合はスキップ
+        if (!race || race.status === 'completed') {
+          continue;
+        }
+        
+        logger.info(`保留レース ${race.id} (${race.name}) の結果を再取得します。`);
+        
+        // レース種別に応じた結果取得
+        let resultData = null;
+        try {
+          if (race.type === 'jra') {
+            resultData = await fetchJraRaceResults(race.id);
+            if (resultData && (resultData.results.length > 0 || Object.values(resultData.payouts).some(arr => arr.length > 0))) {
+              await updateJraRaceResult(race.id, resultData);
+              logger.info(`レース ${race.id} のステータスを completed に更新しました。`);
+              
+              // 結果通知
+              await notifyRaceResult(race);
+              
+            } else {
+              // 再試行回数をインクリメント
+              const retryCount = (pendingRace.retryCount || 0) + 1;
+              
+              if (retryCount < MAX_RETRY_COUNT) {
+                // 最大試行回数未満なら再度保留リストに追加
+                addToPendingRaces({...race, retryCount});
+                logger.info(`レース ${race.id} の結果をまだ取得できません。再試行回数: ${retryCount}/${MAX_RETRY_COUNT}`);
+              } else {
+                logger.warn(`レース ${race.id} は最大再試行回数に達しました。処理をスキップします。`);
+              }
+            }
+          } else if (race.type === 'nar') {
+            resultData = await fetchNarRaceResults(race.id);
+            if (resultData && (resultData.results.length > 0 || Object.values(resultData.payouts).some(arr => arr.length > 0))) {
+              await updateNarRaceResult(race.id, resultData);
+              logger.info(`レース ${race.id} のステータスを completed に更新しました。`);
+              
+              // 結果通知
+              await notifyRaceResult(race);
+              
+            } else {
+              // 再試行回数をインクリメント
+              const retryCount = (pendingRace.retryCount || 0) + 1;
+              
+              if (retryCount < MAX_RETRY_COUNT) {
+                // 最大試行回数未満なら再度保留リストに追加
+                addToPendingRaces({...race, retryCount});
+                logger.info(`レース ${race.id} の結果をまだ取得できません。再試行回数: ${retryCount}/${MAX_RETRY_COUNT}`);
+              } else {
+                logger.warn(`レース ${race.id} は最大再試行回数に達しました。処理をスキップします。`);
+              }
+            }
+          }
+        } catch (resultError) {
+          logger.error(`保留レース ${race.id} の結果処理中にエラーが発生しました: ${resultError}`);
+          
+          // 再試行回数をインクリメント
+          const retryCount = (pendingRace.retryCount || 0) + 1;
+          
+          if (retryCount < MAX_RETRY_COUNT) {
+            // 最大試行回数未満なら再度保留リストに追加
+            addToPendingRaces({...race, retryCount});
+          } else {
+            logger.warn(`レース ${race.id} は最大再試行回数に達しました。処理をスキップします。`);
+          }
+        }
+      } catch (error) {
+        logger.error(`保留レース処理中にエラー: ${error}`);
+      }
+    }
+    
+    logger.info(`保留レース再チェック完了。残り保留レース: ${pendingRaces.length}件`);
+  } catch (error) {
+    logger.error(`保留レース再チェック中にエラー: ${error}`);
+  }
+}
+
+/**
+ * レースを保留リストに追加
+ * @param {Object} race - 保留するレース情報
+ */
+function addToPendingRaces(race) {
+  // すでに保留リストにある場合は追加しない
+  if (!pendingRaces.some(pendingRace => pendingRace.id === race.id)) {
+    pendingRaces.push({
+      id: race.id,
+      type: race.type,
+      venue: race.venue,
+      number: race.number,
+      name: race.name,
+      date: race.date,
+      time: race.time,
+      retryCount: race.retryCount || 0
+    });
+  }
+}
+
+/**
+ * レース結果をDiscordに通知
+ * @param {Object} race - レース情報
+ */
+async function notifyRaceResult(race) {
+  if (client) {
+    const notificationChannel = process.env.NOTIFICATION_CHANNEL_ID;
+    if (notificationChannel) {
+      try {
+        const channel = await client.channels.fetch(notificationChannel);
+        if (channel) {
+          await channel.send({
+            content: `🏁 **レース結果確定**\n${race.venue} ${race.number}R ${race.name}\n\n結果と払戻金の確認は \`/result ${race.id}\` で行えます。`
+          });
+        }
+      } catch (notifyError) {
+        logger.error(`通知送信中にエラー: ${notifyError}`);
+      }
+    }
   }
 }
 

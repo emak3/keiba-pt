@@ -1,4 +1,4 @@
-// services/database/raceService.js
+// services/database/raceService.js - 未処理レース取得機能を追加
 import { doc, collection, setDoc, getDoc, getDocs, query, where, updateDoc, increment } from 'firebase/firestore';
 import { getDb } from '../../config/firebase-config.js';
 import logger from '../../utils/logger.js';
@@ -661,6 +661,47 @@ export async function getRacesByDate(dateString) {
 }
 
 /**
+ * 未処理のレースを取得（追加関数）
+ * @param {string} dateString - YYYYMMDD形式の日付文字列
+ * @returns {Promise<Array>} 未処理のレース情報配列
+ */
+export async function getUnprocessedRaces(dateString) {
+  try {
+    const db = getDb();
+    // upcomingもしくはin_progressのレースを検索
+    const racesQuery = query(
+      collection(db, 'races'), 
+      where('date', '==', dateString),
+      where('status', 'in', ['upcoming', 'in_progress'])
+    );
+    
+    const racesSnapshot = await getDocs(racesQuery);
+    
+    const races = [];
+    racesSnapshot.forEach(doc => {
+      const raceData = doc.data();
+      races.push({
+        id: doc.id,
+        ...raceData
+      });
+    });
+    
+    // 時間でソート
+    races.sort((a, b) => {
+      if (a.time !== b.time) {
+        return a.time.localeCompare(b.time);
+      }
+      return a.number - b.number;
+    });
+    
+    return races;
+  } catch (error) {
+    logger.error(`未処理レースの取得中にエラーが発生しました: ${error}`);
+    throw error;
+  }
+}
+
+/**
  * レースのステータスを現在時刻に基づいて処理
  * @param {Object} raceData - レースデータ
  * @returns {Object} 処理後のレースデータ
@@ -692,12 +733,15 @@ function processRaceStatus(raceData) {
   // 発走5分前～発走後2分はin_progress
   const beforeRace = new Date(raceDate.getTime() - 5 * 60 * 1000);
   const afterRace = new Date(raceDate.getTime() + 2 * 60 * 1000);
-  const afterRaceCompletion = new Date(raceDate.getTime() + 10 * 60 * 1000); // 10分後には完了しているはず
+  // 15分後までcompletedにしない（修正: 発走後15分後に結果取得するため）
+  const afterRaceCompletion = new Date(raceDate.getTime() + 15 * 60 * 1000);
   
   if (now > afterRaceCompletion) {
-    // レース後10分以上経過している場合は完了としてマーク
-    if (processedRace.status !== 'completed') {
-      processedRace.status = 'completed';
+    // レース後15分以上経過している場合はcompletedにしない（スケジューラーが決定する）
+    // これは発走後15分以上経過しても、結果が取得できないケースがあるため
+    if (processedRace.status === 'completed') {
+      // 既にcompletedなら変更しない
+      return processedRace;
     }
   } else if (now > beforeRace && now < afterRace) {
     // 発走直前～レース中
