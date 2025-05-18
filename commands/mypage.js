@@ -1,5 +1,5 @@
 // commands/mypage.js
-import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { MessageFlags, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { getUser, saveUser } from '../services/database/userService.js';
 import { getUserBets } from '../services/database/betService.js';
 import logger from '../utils/logger.js';
@@ -10,7 +10,7 @@ export default {
     .setDescription('自分の情報と馬券購入履歴を表示します'),
   
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     
     try {
       // ユーザー情報を保存
@@ -87,69 +87,8 @@ export async function displayMypage(interaction, user, historyLimit = 10) {
       components: [row]
     });
     
-    // ボタンのインタラクションコレクター
-    const filter = i => i.customId.startsWith('mypage_') && i.user.id === interaction.user.id;
-    
-    const collector = interaction.channel.createMessageComponentCollector({ 
-      filter, 
-      time: 600000 // 10分間有効
-    });
-    
-    collector.on('collect', async i => {
-      try {
-        if (i.customId === 'mypage_refresh') {
-          // マイページを更新
-          await i.update({ content: '更新中...', embeds: [], components: [] });
-          
-          // 最新のユーザー情報を取得
-          const updatedUser = await getUser(interaction.user.id);
-          if (!updatedUser) {
-            await i.editReply('ユーザー情報の取得に失敗しました。');
-            return;
-          }
-          
-          // 最新の表示を行う
-          await displayMypage(
-            { 
-              ...i, 
-              user: interaction.user,
-              editReply: options => i.editReply(options)
-            }, 
-            updatedUser, 
-            historyLimit
-          );
-        } else if (i.customId === 'mypage_more_history') {
-          // より多くの履歴を表示
-          await i.deferUpdate();
-          
-          // 最大30件の履歴を取得
-          const moreHistoryLimit = 30;
-          const moreBets = await getUserBets(interaction.user.id, moreHistoryLimit);
-          
-          // 履歴エンベッドを更新
-          const moreHistoryText = formatBetHistory(moreBets);
-          
-          const moreHistoryEmbed = new EmbedBuilder()
-            .setTitle(`${interaction.user.username} さんの馬券購入履歴（詳細）`)
-            .setDescription(moreHistoryText)
-            .setFooter({ text: `詳細表示（最新の${moreHistoryLimit}件）` })
-            .setColor(0x00b0f4)
-            .setTimestamp();
-          
-          await i.editReply({
-            embeds: [userEmbed, moreHistoryEmbed],
-            components: [row]
-          });
-        }
-      } catch (error) {
-        logger.error(`マイページボタン処理中にエラー: ${error}`);
-        await i.reply({ content: 'エラーが発生しました。もう一度お試しください。', ephemeral: true });
-      }
-    });
-    
-    collector.on('end', () => {
-      // 必要に応じてボタンを無効化
-    });
+    // 重要: ここでのインタラクションコレクターは使用しない
+    // 代わりにグローバルなインタラクションハンドラーで処理する
   } catch (error) {
     logger.error(`マイページ表示処理中にエラー: ${error}`);
     throw error;

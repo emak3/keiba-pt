@@ -1,5 +1,6 @@
 // commands/races.js
-import { 
+import {
+  MessageFlags,
   SlashCommandBuilder, 
   EmbedBuilder, 
   ActionRowBuilder, 
@@ -239,7 +240,7 @@ export default {
           try {
             await i.reply({ 
               content: 'このメニューは他のユーザーのコマンド結果用です。自分で `/races` コマンドを実行してください。', 
-              ephemeral: true 
+              flags: MessageFlags.Ephemeral 
             });
           } catch (replyError) {
             logger.error(`他ユーザーへの警告メッセージ送信エラー: ${replyError}`);
@@ -472,7 +473,7 @@ async function handleInteractionError(interaction, error) {
     if (interaction.replied) {
       await interaction.followUp({
         content: 'エラーが発生しました。もう一度操作をお試しください。',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     } else if (interaction.deferred) {
       await interaction.editReply({
@@ -488,7 +489,7 @@ async function handleInteractionError(interaction, error) {
           try {
             await interaction.reply({
               content: 'エラーが発生しました。もう一度操作をお試しください。',
-              ephemeral: true
+              flags: MessageFlags.Ephemeral
             });
           } catch (replyError) {
             logger.error(`応答失敗: ${replyError}`);
@@ -498,7 +499,7 @@ async function handleInteractionError(interaction, error) {
         try {
           await interaction.reply({
             content: 'エラーが発生しました。もう一度操作をお試しください。',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         } catch (replyError) {
           logger.error(`応答失敗: ${replyError}`);

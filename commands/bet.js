@@ -1,4 +1,5 @@
 import {
+  MessageFlags,
   SlashCommandBuilder,
   EmbedBuilder,
   ActionRowBuilder,
@@ -53,7 +54,7 @@ export default {
         .setMaxValue(10000)),
   
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     
     try {
       // ユーザー情報を保存
@@ -194,7 +195,7 @@ export default {
       if (!user) {
         return await interaction.followUp({ 
           content: 'ユーザー情報の取得に失敗しました。', 
-          ephemeral: true 
+          flags: MessageFlags.Ephemeral 
         });
       }
       
@@ -203,7 +204,7 @@ export default {
       if (!race) {
         return await interaction.followUp({ 
           content: `レースID ${raceId} の情報が見つかりませんでした。`, 
-          ephemeral: true 
+          flags: MessageFlags.Ephemeral 
         });
       }
       
@@ -222,7 +223,7 @@ export default {
       if (now > twoMinutesBefore) {
         return await interaction.followUp({ 
           content: 'このレースは発走2分前を過ぎているため、馬券を購入できません。', 
-          ephemeral: true 
+          flags: MessageFlags.Ephemeral 
         });
       }
       
@@ -286,12 +287,12 @@ export default {
       if (interaction.deferred) {
         await interaction.followUp({ 
           content: '処理中にエラーが発生しました。もう一度お試しください。', 
-          ephemeral: true 
+          flags: MessageFlags.Ephemeral 
         });
       } else {
         await interaction.reply({ 
           content: '処理中にエラーが発生しました。もう一度お試しください。', 
-          ephemeral: true 
+          flags: MessageFlags.Ephemeral 
         });
       }
     }
@@ -326,7 +327,7 @@ export default {
       if (!race) {
         return await interaction.followUp({
           content: `レース情報の取得に失敗しました。`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
       
@@ -355,7 +356,7 @@ export default {
         const canceledNames = canceledHorses.map(h => `${h.horseNumber}番: ${h.horseName}`).join('\n');
         return await interaction.followUp({
           content: `選択した馬に出走取消馬が含まれています。\n${canceledNames}`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
       
@@ -425,7 +426,7 @@ export default {
       try {
         await interaction.followUp({
           content: `エラーが発生しました: ${error.message}`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       } catch (followUpError) {
         logger.error(`フォローアップエラー: ${followUpError}`);
@@ -435,7 +436,7 @@ export default {
   
   async handleFormationBet(interaction) {
     try {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       
       // customId から情報を抽出
       const parts = interaction.customId.split('_');

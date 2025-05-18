@@ -1,6 +1,6 @@
 // index.js
 import { setupInteractionHandlers } from './utils/interactionHandlers.js';
-import { Client, GatewayIntentBits, Collection, Events, REST, Routes } from 'discord.js';
+import { MessageFlags, Client, GatewayIntentBits, Collection, Events, REST, Routes } from 'discord.js';
 import { config } from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -116,7 +116,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     const replyOptions = {
       content: 'このコマンドの実行中にエラーが発生しました。',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     };
 
     try {
