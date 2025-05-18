@@ -9,12 +9,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { saveJraRace, saveNarRace } from '../database/raceService.js';
 
 // 文字エンコーディング関連の関数をインポート
-import { 
-    detectCharset, 
-    validateRaceName, 
-    validateVenueName, 
-    cleanJapaneseText, 
-    recommendedAxiosConfig 
+import {
+    detectCharset,
+    validateRaceName,
+    validateVenueName,
+    cleanJapaneseText,
+    recommendedAxiosConfig
 } from '../../utils/textCleaner.js';
 
 /**
@@ -24,60 +24,60 @@ import {
  * @returns {Promise<{$: CheerioStatic, html: string}>} パース済みCheerioオブジェクトとHTML
  */
 async function fetchAndParse(url, debugFilename = null) {
-  let retryCount = 0;
-  const maxRetries = 3;
-  let delay = 1000; // 初期遅延1秒
-  
-  logger.info(`データ取得中: ${url}`);
-  
-  while (retryCount < maxRetries) {
-    try {
-      // リクエスト設定を適用
-      const config = recommendedAxiosConfig;
-      
-      // リクエスト実行
-      const response = await axios.get(url, config);
-      
-      // 文字コードを検出
-      const charset = detectCharset(response);
-      logger.debug(`検出された文字コード: ${charset}`);
-      
-      // 指定された文字コードでデコード
-      const html = iconv.decode(Buffer.from(response.data), charset);
-      
-      // デバッグ用にファイル保存
-      if (debugFilename) {
-        const debugDir = path.join(process.cwd(), 'debug');
-        if (!fs.existsSync(debugDir)) {
-          fs.mkdirSync(debugDir);
+    let retryCount = 0;
+    const maxRetries = 3;
+    let delay = 1000; // 初期遅延1秒
+
+    logger.info(`データ取得中: ${url}`);
+
+    while (retryCount < maxRetries) {
+        try {
+            // リクエスト設定を適用
+            const config = recommendedAxiosConfig;
+
+            // リクエスト実行
+            const response = await axios.get(url, config);
+
+            // 文字コードを検出
+            const charset = detectCharset(response);
+            logger.debug(`検出された文字コード: ${charset}`);
+
+            // 指定された文字コードでデコード
+            const html = iconv.decode(Buffer.from(response.data), charset);
+
+            // デバッグ用にファイル保存
+            if (debugFilename) {
+                const debugDir = path.join(process.cwd(), 'debug');
+                if (!fs.existsSync(debugDir)) {
+                    fs.mkdirSync(debugDir);
+                }
+
+                // デコードしたHTMLを保存
+                fs.writeFileSync(path.join(debugDir, debugFilename), html, 'utf-8');
+            }
+
+            // Cheerioでパース
+            const $ = cheerio.load(html, {
+                decodeEntities: false // HTML実体参照をデコードしない
+            });
+
+            return { $, html };
+
+        } catch (error) {
+            retryCount++;
+
+            if (retryCount >= maxRetries) {
+                logger.error(`最大再試行回数(${maxRetries})に達しました: ${error}`);
+                throw error;
+            }
+
+            logger.warn(`リクエスト失敗 (${retryCount}/${maxRetries}): ${error}. ${delay}ms後に再試行します。`);
+
+            // 指数バックオフで待機
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2; // 次回の待機時間を2倍に
         }
-        
-        // デコードしたHTMLを保存
-        fs.writeFileSync(path.join(debugDir, debugFilename), html, 'utf-8');
-      }
-      
-      // Cheerioでパース
-      const $ = cheerio.load(html, {
-        decodeEntities: false // HTML実体参照をデコードしない
-      });
-      
-      return { $, html };
-      
-    } catch (error) {
-      retryCount++;
-      
-      if (retryCount >= maxRetries) {
-        logger.error(`最大再試行回数(${maxRetries})に達しました: ${error}`);
-        throw error;
-      }
-      
-      logger.warn(`リクエスト失敗 (${retryCount}/${maxRetries}): ${error}. ${delay}ms後に再試行します。`);
-      
-      // 指数バックオフで待機
-      await new Promise(resolve => setTimeout(resolve, delay));
-      delay *= 2; // 次回の待機時間を2倍に
     }
-  }
 }
 
 /**
@@ -95,55 +95,55 @@ function getTodayDateString() {
  */
 function formatVenueName(venueName) {
     if (!venueName) return '不明競馬場';
-    
+
     // 「○回」「○日目」のパターンを抽出
     const roundPattern = /([\d]+回)/;
     const dayPattern = /([\d]+日目)/;
-    
+
     // メイン会場名を抽出（数字を含まない部分）
     const mainVenuePattern = /(?:[\d]+回)?([^\d]+)(?:[\d]+日目)?/;
-    
+
     const roundMatch = venueName.match(roundPattern);
     const dayMatch = venueName.match(dayPattern);
     const mainVenueMatch = venueName.match(mainVenuePattern);
-    
+
     let mainVenue = '';
     let roundInfo = '';
     let dayInfo = '';
-    
+
     if (mainVenueMatch && mainVenueMatch[1]) {
         mainVenue = mainVenueMatch[1].trim();
     }
-    
+
     if (roundMatch && roundMatch[1]) {
         roundInfo = roundMatch[1];
     }
-    
+
     if (dayMatch && dayMatch[1]) {
         dayInfo = dayMatch[1];
     }
-    
+
     // 文字化けチェック
-    if (/[\uFFFD\u30FB\u309A-\u309C]/.test(mainVenue) || 
-        mainVenue.includes('��') || 
+    if (/[\uFFFD\u30FB\u309A-\u309C]/.test(mainVenue) ||
+        mainVenue.includes('��') ||
         mainVenue.includes('□') ||
         mainVenue.includes('�')) {
         mainVenue = validateVenueName(mainVenue);
     }
-    
+
     // 整形した会場名を組み立て
     let formattedName = '';
-    
+
     if (roundInfo) {
         formattedName += roundInfo + ' ';
     }
-    
+
     formattedName += mainVenue;
-    
+
     if (dayInfo) {
         formattedName += ' ' + dayInfo;
     }
-    
+
     return formattedName.trim();
 }
 
@@ -344,7 +344,7 @@ export async function fetchNarRaceListEnhanced(dateString = getTodayDateString()
 }
 
 /**
- * JRAレースの出走馬情報を取得 - 強化版
+ * JRAレースの出走馬情報を取得 - HTML構造に最適化版
  * @param {string} raceId - レースID
  * @returns {Promise<Array>} 出走馬情報
  */
@@ -358,69 +358,78 @@ export async function fetchJraHorsesEnhanced(raceId) {
 
         const horses = [];
 
-        // 出走馬テーブルを処理
-        $('.HorseList').each((index, element) => {
-            // 枠番 - Waku1, Waku2 などのクラスから取得
-            const frameNumberElement = $(element).find('[class^="Waku"]').first();
-            const frameNumber = frameNumberElement.find('span').text().trim() || frameNumberElement.text().trim();
-            
-            // 馬番 - Umaban1, Umaban2 などのクラスから取得
-            const horseNumberElement = $(element).find('[class^="Umaban"]').first();
-            const horseNumber = horseNumberElement.text().trim();
-            
-            // 馬名
-            const horseName = $(element).find('.HorseName a').text().trim();
-            
-            // 騎手
-            const jockey = $(element).find('.Jockey a').text().trim();
-            
-            // 調教師
-            const trainer = $(element).find('.Trainer a').text().trim();
-            
-            // 馬体重
-            const weight = $(element).find('.Weight').text().trim();
-            
-            // オッズ - 複数のパターンに対応
-            let odds = '';
-            const oddsElement = $(element).find('.Popular span[id^="odds-"]');
-            if (oddsElement.length > 0) {
-                odds = oddsElement.text().trim();
-            } else {
-                const altOddsElement = $(element).find('.Txt_R');
-                odds = altOddsElement.text().trim().replace(/[^\d\.]/g, '');
-            }
-            
-            // 人気 - 複数のパターンに対応
-            let popularity = '';
-            const popularityElement = $(element).find('.Popular_Ninki span[id^="ninki-"]');
-            if (popularityElement.length > 0) {
-                popularity = popularityElement.text().trim();
-            } else {
-                const altPopularityElement = $(element).find('.Popular.Txt_C span');
-                popularity = altPopularityElement.text().trim();
-            }
-
-            // 馬名の文字化けチェック
-            const hasGarbledName = /[\uFFFD\u30FB\u309A-\u309C]/.test(horseName) ||
-                horseName.includes('��') ||
-                horseName.includes('□') ||
-                horseName.includes('�');
-
-            if (hasGarbledName) {
-                logger.warn(`馬名が文字化けしている可能性: ${horseName}`);
-            }
-
-            // 馬情報を追加
-            horses.push({
-                frameNumber: parseInt(frameNumber, 10) || 0,
-                horseNumber: parseInt(horseNumber, 10) || 0,
-                horseName: cleanJapaneseText(horseName) || `${horseNumber}番馬`,
-                jockey: cleanJapaneseText(jockey) || '騎手不明',
-                trainer: cleanJapaneseText(trainer) || '調教師不明',
-                weight: weight || '',
-                odds: parseFloat(odds) || 0,
-                popularity: parseInt(popularity, 10) || 0
+        // デバッグ: 最初の行の構造を出力
+        let firstRow = $('tr.HorseList').first();
+        console.log("=== JRA 最初の行の構造 ===");
+        $(firstRow).find('td').each((i, td) => {
+            console.log(`td[${i}] class="${$(td).attr('class')}" text="${$(td).text().trim()}"`);
+            $(td).find('span').each((j, span) => {
+                console.log(`  span[${j}] id="${$(span).attr('id')}" class="${$(span).attr('class')}" text="${$(span).text().trim()}"`);
             });
+        });
+
+        // 出走馬テーブルを処理 - 行単位で処理
+        $('tr.HorseList').each((index, element) => {
+            try {
+                // 馬番 - HTML構造に基づいて正確に取得
+                let horseNumber = '';
+                const umabanTd = $(element).find('td[class^="Umaban"]');
+                if (umabanTd.length > 0) {
+                    horseNumber = umabanTd.text().trim();
+                }
+
+                // 枠番 - HTML構造に基づいて正確に取得
+                let frameNumber = '';
+                const wakuTd = $(element).find('td[class^="Waku"]');
+                if (wakuTd.length > 0) {
+                    frameNumber = wakuTd.find('span').text().trim() || wakuTd.text().trim();
+                }
+
+                // 馬名
+                const horseName = $(element).find('.HorseName a').text().trim();
+
+                // 騎手
+                const jockey = $(element).find('.Jockey a').text().trim();
+
+                // 調教師
+                const trainer = $(element).find('.Trainer a').text().trim();
+
+                // 馬体重
+                const weight = $(element).find('.Weight').text().trim();
+
+                // オッズ - JRA固有の構造から取得 (span#odds-X_XX)
+                let odds = 0;
+                const oddsSpan = $(element).find('span[id^="odds-"]');
+                if (oddsSpan.length > 0) {
+                    odds = parseFloat(oddsSpan.text().trim()) || 0;
+                }
+
+                // 人気 - JRA固有の構造から取得 (span#ninki-X_XX)
+                let popularity = 0;
+                const ninkiSpan = $(element).find('span[id^="ninki-"]');
+                if (ninkiSpan.length > 0) {
+                    popularity = parseInt(ninkiSpan.text().trim(), 10) || 0;
+                }
+
+                // デバッグログ
+                console.log(`JRA 行[${index + 1}]: 馬番=${horseNumber}, 枠番=${frameNumber}, 馬名=${horseName}, オッズ=${odds}, 人気=${popularity}`);
+
+                // 馬情報を追加 (有効な馬番がある場合のみ)
+                if (horseNumber && parseInt(horseNumber, 10) > 0) {
+                    horses.push({
+                        frameNumber: parseInt(frameNumber, 10) || 0,
+                        horseNumber: parseInt(horseNumber, 10) || 0,
+                        horseName: cleanJapaneseText(horseName) || `${horseNumber}番馬`,
+                        jockey: cleanJapaneseText(jockey) || '不明',
+                        trainer: cleanJapaneseText(trainer) || '不明',
+                        weight: weight || '',
+                        odds: odds,
+                        popularity: popularity
+                    });
+                }
+            } catch (rowError) {
+                logger.error(`JRA 行処理中にエラー: ${rowError}`);
+            }
         });
 
         logger.info(`JRA: レース ${raceId} の出走馬情報 ${horses.length} 件を取得しました。`);
@@ -432,7 +441,7 @@ export async function fetchJraHorsesEnhanced(raceId) {
 }
 
 /**
- * NARレースの出走馬情報を取得 - 強化版
+ * NARレースの出走馬情報を取得 - HTML構造に最適化版
  * @param {string} raceId - レースID
  * @returns {Promise<Array>} 出走馬情報
  */
@@ -446,126 +455,104 @@ export async function fetchNarHorsesEnhanced(raceId) {
 
         const horses = [];
 
-        // 出走馬テーブルを処理（複数のセレクタパターンを試行）
-        const horseRowSelectors = [
-            '.HorseList',
-            '.Shutuba_Table tr:not(:first-child)',
-            '.RaceTableArea tr:not(:first-child)'
-        ];
-        
-        let horseRows = [];
-        
-        // いずれかのセレクタで馬情報を取得
-        for (const selector of horseRowSelectors) {
-            const rows = $(selector);
-            if (rows.length > 0) {
-                horseRows = rows;
-                break;
-            }
-        }
-        
-        // 各行を処理
-        horseRows.each((index, element) => {
-            // 枠番 - 複数のパターンに対応
-            let frameNumber = '';
-            const frameSelectors = ['[class^="Waku"]', '.Waku', 'td:nth-child(1)'];
-            
-            for (const selector of frameSelectors) {
-                const cell = $(element).find(selector);
-                if (cell.length > 0) {
-                    frameNumber = cell.text().trim().replace(/\D/g, '');
-                    if (frameNumber) break;
+        // デバッグ: 最初の行の構造を出力
+        let firstRow = $('tr.HorseList').first();
+        console.log("=== NAR 最初の行の構造 ===");
+        $(firstRow).find('td').each((i, td) => {
+            console.log(`td[${i}] class="${$(td).attr('class')}" text="${$(td).text().trim()}"`);
+            $(td).find('span').each((j, span) => {
+                console.log(`  span[${j}] id="${$(span).attr('id')}" class="${$(span).attr('class')}" text="${$(span).text().trim()}"`);
+            });
+        });
+
+        // 出走馬テーブルを処理 - 行単位で処理
+        $('tr.HorseList').each((index, element) => {
+            try {
+                // 馬番 - NAR固有の構造
+                let horseNumber = '';
+                const umabanTd = $(element).find('td[class^="Umaban"], td.Umaban');
+                if (umabanTd.length > 0) {
+                    horseNumber = umabanTd.text().trim();
                 }
-            }
-            
-            // 馬番 - 複数のパターンに対応
-            let horseNumber = '';
-            const horseNumSelectors = ['[class^="Umaban"]', '.Umaban', 'td:nth-child(2)'];
-            
-            for (const selector of horseNumSelectors) {
-                const cell = $(element).find(selector);
-                if (cell.length > 0) {
-                    horseNumber = cell.text().trim().replace(/\D/g, '');
-                    if (horseNumber) break;
+
+                // 枠番 - NAR固有の構造
+                let frameNumber = '';
+                const wakuTd = $(element).find('td[class^="Waku"], td.Waku');
+                if (wakuTd.length > 0) {
+                    frameNumber = wakuTd.text().trim();
                 }
-            }
-            
-            // 馬名、騎手、調教師の抽出 - 複数のパターンに対応
-            const horseName = $(element).find('.HorseName a, td:nth-child(4) a').first().text().trim();
-            const jockey = $(element).find('.Jockey a, td:nth-child(7) a').first().text().trim();
-            const trainer = $(element).find('.Trainer a, td:nth-child(9) a').first().text().trim();
-            const weight = $(element).find('.Weight, td:nth-child(12)').first().text().trim();
-            
-            // オッズと人気の抽出 - 複数のパターンに対応
-            let odds = '';
-            let popularity = '';
-            
-            // オッズ - 複数のセレクタを試行
-            const oddsSelectors = [
-                '.Popular span[id^="odds-"]',
-                '.Odds',
-                '.Txt_R',
-                'td:nth-child(10)',
-                '.Popular.Txt_R'
-            ];
-            
-            for (const selector of oddsSelectors) {
-                const cell = $(element).find(selector);
-                if (cell.length > 0) {
-                    // 余分な空白や文字を削除してオッズを抽出
-                    const text = cell.text().trim();
-                    const match = text.match(/\d+\.\d+|\d+/);
-                    if (match) {
-                        odds = match[0];
-                        break;
+
+                // 馬名
+                const horseName = $(element).find('.HorseName a').text().trim();
+
+                // 騎手
+                const jockey = $(element).find('.Jockey a, .Jockey span a').text().trim();
+
+                // 調教師
+                const trainer = $(element).find('.Trainer a').text().trim();
+
+                // 馬体重
+                const weight = $(element).find('.Weight').text().trim();
+
+                // オッズ - NAR固有の構造
+                let odds = 0;
+
+                // 1. Odds_Ninkiクラスを持つspan要素
+                const oddsNinkiSpan = $(element).find('span.Odds_Ninki');
+                if (oddsNinkiSpan.length > 0) {
+                    odds = parseFloat(oddsNinkiSpan.text().trim()) || 0;
+                }
+
+                // 2. Popular Txt_Rクラスを持つtd要素
+                if (odds === 0) {
+                    const oddsTd = $(element).find('td.Popular.Txt_R');
+                    if (oddsTd.length > 0) {
+                        // ブラウザのコンソールログで見ると単純にtext()でとれるはず
+                        const oddsTdText = oddsTd.clone().children().remove().end().text().trim();
+                        if (oddsTdText) {
+                            const oddsMatch = oddsTdText.match(/(\d+\.?\d*)/);
+                            if (oddsMatch) {
+                                odds = parseFloat(oddsMatch[1]) || 0;
+                            }
+                        }
                     }
                 }
-            }
-            
-            // 人気 - 複数のセレクタを試行
-            const popularitySelectors = [
-                '.Popular_Ninki span[id^="ninki-"]',
-                '.Popular span',
-                '.Txt_C span',
-                'td:nth-child(11)',
-                '.Popular.Txt_C span'
-            ];
-            
-            for (const selector of popularitySelectors) {
-                const cell = $(element).find(selector);
-                if (cell.length > 0) {
-                    // 余分な空白や文字を削除して人気順を抽出
-                    const text = cell.text().trim();
-                    const match = text.match(/\d+/);
-                    if (match) {
-                        popularity = match[0];
-                        break;
+
+                // 人気 - NAR固有の構造
+                let popularity = 0;
+
+                // 1. BgYellowクラスを持つtd内のspan
+                const popularityYellowTd = $(element).find('td.BgYellow span');
+                if (popularityYellowTd.length > 0) {
+                    popularity = parseInt(popularityYellowTd.text().trim(), 10) || 0;
+                }
+
+                // 2. Popular Txt_Cクラスを持つtd内のspan
+                if (popularity === 0) {
+                    const popularityTd = $(element).find('td.Popular.Txt_C span');
+                    if (popularityTd.length > 0) {
+                        popularity = parseInt(popularityTd.text().trim(), 10) || 0;
                     }
                 }
-            }
 
-            // 馬名の文字化けチェック
-            const hasGarbledName = /[\uFFFD\u30FB\u309A-\u309C]/.test(horseName) ||
-                horseName.includes('��') ||
-                horseName.includes('□') ||
-                horseName.includes('�');
+                // デバッグログ
+                console.log(`NAR 行[${index + 1}]: 馬番=${horseNumber}, 枠番=${frameNumber}, 馬名=${horseName}, オッズ=${odds}, 人気=${popularity}`);
 
-            if (hasGarbledName) {
-                logger.warn(`馬名が文字化けしている可能性: ${horseName}`);
-            }
-
-            // 馬情報の追加（必須項目があれば）
-            if (horseName && (horseNumber || frameNumber)) {
-                horses.push({
-                    frameNumber: parseInt(frameNumber, 10) || 0,
-                    horseNumber: parseInt(horseNumber, 10) || 0,
-                    horseName: cleanJapaneseText(horseName) || `${horseNumber}番馬`,
-                    jockey: cleanJapaneseText(jockey) || '騎手不明',
-                    trainer: cleanJapaneseText(trainer) || '調教師不明',
-                    weight: weight || '',
-                    odds: parseFloat(odds) || 0,
-                    popularity: parseInt(popularity, 10) || 0
-                });
+                // 馬情報の追加（有効な馬番がある場合のみ）
+                if (horseNumber && parseInt(horseNumber, 10) > 0) {
+                    horses.push({
+                        frameNumber: parseInt(frameNumber, 10) || 0,
+                        horseNumber: parseInt(horseNumber, 10) || 0,
+                        horseName: cleanJapaneseText(horseName) || `${horseNumber}番馬`,
+                        jockey: cleanJapaneseText(jockey) || '不明',
+                        trainer: cleanJapaneseText(trainer) || '不明',
+                        weight: weight || '',
+                        odds: odds,
+                        popularity: popularity
+                    });
+                }
+            } catch (rowError) {
+                logger.error(`NAR 行処理中にエラー: ${rowError}`);
             }
         });
 
@@ -575,4 +562,19 @@ export async function fetchNarHorsesEnhanced(raceId) {
         logger.error(`NAR出走馬情報取得中にエラー: ${error}`);
         throw error;
     }
+}
+
+// デバッグ用の補助関数 - 行が少ない場合は直接すべての行と値を出力
+function debugAllRows($, selector) {
+    const rows = $(selector);
+    console.log(`全${rows.length}行のデバッグ情報:`);
+
+    rows.each((rowIndex, row) => {
+        console.log(`--- 行 ${rowIndex + 1} ---`);
+        $(row).find('td').each((cellIndex, cell) => {
+            const cellClass = $(cell).attr('class') || 'クラスなし';
+            const cellText = $(cell).text().trim();
+            console.log(`Cell ${cellIndex + 1}: class="${cellClass}", text="${cellText}"`);
+        });
+    });
 }

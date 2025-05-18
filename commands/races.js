@@ -858,14 +858,22 @@ async function fetchHorsesForRace(raceId) {
     try {
       // 種別に応じたスクレイピング関数を呼び出し
       if (raceType === 'jra') {
-        // JRAの出走馬情報取得のためにモジュールをインポート
-        const { fetchJraHorsesEnhanced } = await import('../services/scraper/enhancedScraper.js');
+        // JRAの出走馬情報取得
         horses = await fetchJraHorsesEnhanced(raceId);
 
-        // オッズ情報が取得できなかった場合、既存データと結合
+        // オッズ確認とデバッグ
         if (horses && horses.length > 0) {
+          // オッズが取得できているか確認
           const hasOdds = horses.some(h => h.odds && h.odds > 0);
+          logger.info(`オッズ情報: ${hasOdds ? '取得成功' : '取得失敗'}`);
+
+          // オッズ情報の具体例をログ
+          horses.slice(0, 3).forEach(h => {
+            logger.info(`馬番${h.horseNumber} オッズ:${h.odds} 人気:${h.popularity}`);
+          });
+
           if (!hasOdds && existingOddsMap.size > 0) {
+            // 既存データからオッズ補完
             horses = horses.map(horse => {
               if (horse.horseNumber > 0 && existingOddsMap.has(horse.horseNumber)) {
                 const oddsData = existingOddsMap.get(horse.horseNumber);
@@ -879,50 +887,25 @@ async function fetchHorsesForRace(raceId) {
             });
           } else if (hasOdds) {
             oddsRefreshed = true;
-          }
-        }
-
-        // オッズページから追加情報を取得（オプション）
-        if (forceOddsRefresh && !oddsRefreshed) {
-          try {
-            const { fetchJraOddsEnhanced } = await import('../services/scraper/enhancedScraper.js');
-            const oddsData = await fetchJraOddsEnhanced(raceId);
-
-            if (oddsData && oddsData.length > 0) {
-              // 馬番ごとのマップを作成
-              const oddsMap = new Map();
-              oddsData.forEach(item => {
-                oddsMap.set(item.horseNumber, item);
-              });
-
-              // オッズ情報を統合
-              horses = horses.map(horse => {
-                if (horse.horseNumber > 0 && oddsMap.has(horse.horseNumber)) {
-                  const oddsItem = oddsMap.get(horse.horseNumber);
-                  return {
-                    ...horse,
-                    odds: oddsItem.odds || horse.odds,
-                    popularity: oddsItem.popularity || horse.popularity
-                  };
-                }
-                return horse;
-              });
-
-              oddsRefreshed = true;
-            }
-          } catch (oddsError) {
-            logger.error(`オッズ情報の取得中にエラーが発生しました: ${oddsError}`);
           }
         }
       } else {
-        // NARの出走馬情報取得のためにモジュールをインポート
-        const { fetchNarHorsesEnhanced } = await import('../services/scraper/enhancedScraper.js');
+        // NARの出走馬情報取得
         horses = await fetchNarHorsesEnhanced(raceId);
 
-        // オッズ情報が取得できなかった場合、既存データと結合
+        // オッズ確認とデバッグ
         if (horses && horses.length > 0) {
+          // オッズが取得できているか確認
           const hasOdds = horses.some(h => h.odds && h.odds > 0);
+          logger.info(`オッズ情報: ${hasOdds ? '取得成功' : '取得失敗'}`);
+
+          // オッズ情報の具体例をログ
+          horses.slice(0, 3).forEach(h => {
+            logger.info(`馬番${h.horseNumber} オッズ:${h.odds} 人気:${h.popularity}`);
+          });
+
           if (!hasOdds && existingOddsMap.size > 0) {
+            // 既存データからオッズ補完
             horses = horses.map(horse => {
               if (horse.horseNumber > 0 && existingOddsMap.has(horse.horseNumber)) {
                 const oddsData = existingOddsMap.get(horse.horseNumber);
@@ -936,39 +919,6 @@ async function fetchHorsesForRace(raceId) {
             });
           } else if (hasOdds) {
             oddsRefreshed = true;
-          }
-        }
-
-        // NAR用のオッズページから追加情報を取得（オプション）
-        if (forceOddsRefresh && !oddsRefreshed) {
-          try {
-            const { fetchNarOddsEnhanced } = await import('../services/scraper/enhancedScraper.js');
-            const oddsData = await fetchNarOddsEnhanced(raceId);
-
-            if (oddsData && oddsData.length > 0) {
-              // 馬番ごとのマップを作成
-              const oddsMap = new Map();
-              oddsData.forEach(item => {
-                oddsMap.set(item.horseNumber, item);
-              });
-
-              // オッズ情報を統合
-              horses = horses.map(horse => {
-                if (horse.horseNumber > 0 && oddsMap.has(horse.horseNumber)) {
-                  const oddsItem = oddsMap.get(horse.horseNumber);
-                  return {
-                    ...horse,
-                    odds: oddsItem.odds || horse.odds,
-                    popularity: oddsItem.popularity || horse.popularity
-                  };
-                }
-                return horse;
-              });
-
-              oddsRefreshed = true;
-            }
-          } catch (oddsError) {
-            logger.error(`NARオッズ情報の取得中にエラーが発生しました: ${oddsError}`);
           }
         }
       }
@@ -1132,8 +1082,7 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
         horse.horseNumber > 0 &&
         horse.horseName &&
         horse.horseName !== '番馬' &&
-        horse.horseName !== '不明' &&
-        horse.jockey
+        horse.horseName !== '不明'
       );
 
       // 馬番が最大値を超えているエントリを除外
@@ -1146,11 +1095,19 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
       // 馬番でソート
       const sortedHorses = [...filteredHorses].sort((a, b) => a.horseNumber - b.horseNumber);
 
+      // デバッグログ
+      console.log("=== 出走馬表示データ ===");
+      sortedHorses.forEach((horse, i) => {
+        if (i < 5) { // 最初の5頭だけログ
+          console.log(`馬番${horse.horseNumber}: 枠=${horse.frameNumber}, 騎手=${horse.jockey}, オッズ=${horse.odds}, 人気=${horse.popularity}`);
+        }
+      });
+
       // 要求された新しいフォーマットで表示
       sortedHorses.forEach(horse => {
         // 枠番と馬番の表示（「枠番がない場合は?」という条件を含む）
         let horseString = `**${horse.frameNumber || '?'}枠${horse.horseNumber}番**: ${horse.horseName}\n`;
-console.log(`うんこーーーーーーーーーーーーーーーーーーーーーーーーーーーー: ${horse.odds} - ${horse.popularity}`)
+
         // 騎手情報の表示
         horseString += `　${horse.jockey || '不明'}`;
 
