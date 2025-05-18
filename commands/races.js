@@ -1100,8 +1100,7 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
       // デバッグログ
       console.log("=== 出走馬表示データ ===");
       sortedHorses.forEach((horse, i) => {
-        if (i < 5) { // 最初の5頭だけログ
-          console.log(`馬番${horse.horseNumber}: 枠=${horse.frameNumber}, 騎手=${horse.jockey}, オッズ=${horse.odds}, 人気=${horse.popularity}`);
+        if (i < 5) {
         }
       });
 
@@ -1111,21 +1110,9 @@ async function displayRaceDetail(interaction, raceId, dateString, history) {
 
       // 要求された新しいフォーマットで表示
       sortedHorses.forEach(horse => {
-        // 枠番と馬番の表示（「枠番がない場合は?」という条件を含む）
-        let horseString = `**${horse.frameNumber || '?'}枠${horse.horseNumber}番**: ${horse.horseName}\n`;
-
-        // 騎手情報の表示
-        horseString += `　${horse.jockey || '不明'}`;
-
-        // オッズ情報を表示（情報があれば）
-        if (horse.odds && horse.odds > 0) {
-          // 修正：小数点以下1桁で表示
-          horseString += ` (${horse.odds.toFixed(1)}倍)`;
-          if (horse.popularity && horse.popularity > 0) {
-            horseString += ` - ${horse.popularity}人気`;
-          }
-        }
-
+        const horseName = horse.isCanceled ? `~~${horse.frameNumber}枠${horse.horseNumber}番: ${horse.horseName} ${'  ( ' + horse.jockey + ' )'}~~` : ` **${horse.frameNumber}枠${horse.horseNumber}番**: ${horse.horseName} ${horse.odds ? '\n' + horse.jockey : '  ( ' + horse.jockey + ' )'}`;
+        // 新しいフォーマット: **枠番馬番**: 馬名 (騎手)
+        let horseString = `${horseName}  ${horse.odds || ''} ${horse.popularity ? '( ' + horse.popularity + '人気 )' : ''}`;
         horsesInfo += horseString + '\n\n';
       });
 
@@ -1377,21 +1364,21 @@ async function displayHorseSelection(interaction, raceId, betType, method) {
     // ================================
 
     filteredHorses.forEach(horse => {
-      let description = `騎手: ${horse.jockey || '情報なし'}`;
-
-      // オッズ情報があれば表示（小数点以下1桁で表示）
-      if (horse.odds && horse.odds > 0) {
-        description += ` / オッズ: ${horse.odds.toFixed(1)}倍`;
-        if (horse.popularity && horse.popularity > 0) {
-          description += ` (${horse.popularity}人気)`;
-        }
+      if (!horse.isCanceled) {
+        options.push({
+          label: `${horse.frameNumber}枠${horse.horseNumber}番: ${horse.horseName}`,
+          description: `騎手: ${horse.jockey || '情報なし'}`,
+          value: `${horse.horseNumber}`
+        });
+      } else {
+        // 取消馬も表示するが選択不可にする（オプション）
+        options.push({
+          label: `${horse.frameNumber}枠${horse.horseNumber}番: ${horse.horseName} 【取消】`,
+          description: `騎手: ${horse.jockey || '情報なし'} - 出走取消`,
+          value: `${horse.horseNumber}`,
+          disabled: true // 選択できないようにする
+        });
       }
-
-      horseOptions.push({
-        label: `${horse.horseNumber}番: ${horse.horseName}`,
-        description: description,
-        value: `${horse.horseNumber}`
-      });
     });
 
     // 馬選択メニュー
@@ -1690,7 +1677,17 @@ async function processBetPurchase(interaction, raceId, betType, method, selected
       }
     }
 
-    // 馬券購入
+    const canceledHorses = race.horses.filter(h => h.isCanceled && selectedHorses.includes(h.horseNumber));
+    if (canceledHorses.length > 0) {
+      // 取消馬が含まれている場合はエラーメッセージを表示
+      const canceledHorsesList = canceledHorses.map(h => `${h.frameNumber}枠${h.horseNumber}番: ${h.horseName}`).join(', ');
+      return await interaction.followUp({
+        content: `選択した馬の中に出走取消馬が含まれています: ${canceledHorsesList}`,
+        ephemeral: true
+      });
+    }
+
+    // 問題なければ馬券購入処理を実行
     const bet = await placeBet(
       interaction.user.id,
       raceId,
