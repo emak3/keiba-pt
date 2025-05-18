@@ -17,7 +17,9 @@ class Logger {
    * @returns {string} 現在時刻のフォーマット済み文字列
    */
   getTimestamp() {
-    const now = new Date();
+    const noww = new Date()
+    const offset = 9 * 60 * 60 * 1000 // 9時間
+    const now = new Date(noww.getTime() + offset);
     return now.toISOString();
   }
 
