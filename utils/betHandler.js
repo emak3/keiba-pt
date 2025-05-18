@@ -40,9 +40,9 @@ const methodNames = {
  */
 export default class BetHandler {
     /**
-     * 馬券タイプ選択メニューを処理
-     * @param {StringSelectMenuInteraction} interaction - インタラクション
-     */
+ * 馬券タイプ選択メニューを処理
+ * @param {StringSelectMenuInteraction} interaction - インタラクション
+ */
     static async handleBetTypeSelection(interaction) {
         try {
             await interaction.deferUpdate().catch(err => {
@@ -64,6 +64,23 @@ export default class BetHandler {
                     components: []
                 });
             }
+
+            // ユーザー情報を取得
+            const user = await getUser(interaction.user.id);
+            if (!user) {
+                return await interaction.editReply({
+                    content: 'ユーザー情報の取得に失敗しました。',
+                    embeds: [],
+                    components: []
+                });
+            }
+
+            // セッション初期化（グローバル変数使用）
+            if (!global.betSessions) global.betSessions = {};
+            global.betSessions[`${interaction.user.id}_${raceId}`] = {
+                betType: betType,
+                timestamp: Date.now()
+            };
 
             // 購入方法選択メニュー
             const options = [];
@@ -103,16 +120,144 @@ export default class BetHandler {
             const methodRow = new ActionRowBuilder()
                 .addComponents(
                     new StringSelectMenuBuilder()
-                        .setCustomId(`bet_select_method_${raceId}_${betType}`)
+                        .setCustomId(`bet_select_method_${raceId}`)
                         .setPlaceholder('購入方法を選択してください')
                         .addOptions(options)
                 );
 
+            // 戻るボタン
+            const backButton = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`bet_back_to_race_${raceId}`)
+                        .setLabel('レース詳細に戻る')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+
+            // エンベッド
+            const embed = new EmbedBuilder()
+                .setTitle(`🏇 馬券購入 - ${race.venue} ${race.number}R ${race.name}`)
+                .setDescription(`**${betTypeNames[betType]}**の購入方法を選択してください`)
+                .setColor(0x00b0f4)
+                .setTimestamp()
+                .addFields(
+                    { name: '現在のポイント', value: `${user.points}pt` }
+                );
+
+            await interaction.editReply({
+                embeds: [embed],
+                components: [methodRow, backButton]
+            });
+        } catch (error) {
+            logger.error(`馬券タイプ選択処理中にエラー: ${error}`);
+            await this.handleError(interaction, error);
+        }
+    }
+
+    /**
+ * 馬券購入方法選択を処理
+ * @param {StringSelectMenuInteraction} interaction - インタラクション
+ */
+    static async handleMethodSelection(interaction) {
+        try {
+            await interaction.deferUpdate().catch(err => {
+                logger.warn(`deferUpdate エラー (無視して続行): ${err}`);
+            });
+
+            // カスタムIDからパラメータを解析
+            const parts = interaction.customId.split('_');
+            // [0]=bet, [1]=select, [2]=method, [3]=raceId
+            const raceId = parts[3];
+            const method = interaction.values[0];
+
+            // セッションを確認・更新
+            if (!global.betSessions) global.betSessions = {};
+            const sessionKey = `${interaction.user.id}_${raceId}`;
+            const session = global.betSessions[sessionKey];
+
+            if (!session || !session.betType) {
+                return await interaction.editReply({
+                    content: 'セッションが失効しました。最初からやり直してください。',
+                    embeds: [],
+                    components: []
+                });
+            }
+
+            // セッションに購入方法を追加
+            session.method = method;
+            session.timestamp = Date.now();
+            global.betSessions[sessionKey] = session;
+
+            // レース情報を取得
+            const race = await getRaceById(raceId);
+            if (!race) {
+                return await interaction.editReply({
+                    content: `レースID ${raceId} の情報が見つかりませんでした。`,
+                    embeds: [],
+                    components: []
+                });
+            }
+
+            // ユーザー情報を取得
+            const user = await getUser(interaction.user.id);
+            if (!user) {
+                return await interaction.editReply({
+                    content: 'ユーザー情報の取得に失敗しました。',
+                    embeds: [],
+                    components: []
+                });
+            }
+
+            // フォーメーション購入（モーダル表示）
+            if (method === 'formation') {
+                // 金額選択メニュー
+                const amountRow = new ActionRowBuilder()
+                    .addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId(`bet_select_amount_${raceId}`)
+                            .setPlaceholder('金額を選択してください')
+                            .addOptions([
+                                { label: '100pt', value: '100', emoji: '💰' },
+                                { label: '200pt', value: '200', emoji: '💰' },
+                                { label: '500pt', value: '500', emoji: '💰' },
+                                { label: '1000pt', value: '1000', emoji: '💰' },
+                                { label: '2000pt', value: '2000', emoji: '💰' },
+                                { label: '5000pt', value: '5000', emoji: '💰' }
+                            ])
+                    );
+
+                // 戻るボタン
+                const backButton = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`bet_back_to_type_${raceId}`)
+                            .setLabel('馬券種類選択に戻る')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+
+                // エンベッド
+                const embed = new EmbedBuilder()
+                    .setTitle(`🏇 馬券購入 - ${race.venue} ${race.number}R ${race.name}`)
+                    .setDescription(`**${betTypeNames[session.betType]}**（${methodNames[method]}）購入の金額を選択してください`)
+                    .setColor(0x00b0f4)
+                    .setTimestamp()
+                    .addFields(
+                        { name: '現在のポイント', value: `${user.points}pt` }
+                    );
+
+                await interaction.editReply({
+                    embeds: [embed],
+                    components: [amountRow, backButton]
+                });
+                return;
+            }
+
+            // 通常/ボックス購入の場合
             // 金額選択メニュー
             const amountRow = new ActionRowBuilder()
                 .addComponents(
                     new StringSelectMenuBuilder()
-                        .setCustomId(`bet_select_amount_${raceId}_${betType}`)
+                        .setCustomId(`bet_select_amount_${raceId}`)
                         .setPlaceholder('金額を選択してください')
                         .addOptions([
                             { label: '100pt', value: '100', emoji: '💰' },
@@ -128,80 +273,69 @@ export default class BetHandler {
             const backButton = new ActionRowBuilder()
                 .addComponents(
                     new ButtonBuilder()
-                        .setCustomId(`bet_back_to_race_${raceId}`)
-                        .setLabel('レース詳細に戻る')
+                        .setCustomId(`bet_back_to_type_${raceId}`)
+                        .setLabel('馬券種類選択に戻る')
                         .setStyle(ButtonStyle.Secondary)
                 );
 
-            // レースエンベッド
-            const raceEmbed = new EmbedBuilder()
+            // エンベッド
+            const embed = new EmbedBuilder()
                 .setTitle(`🏇 馬券購入 - ${race.venue} ${race.number}R ${race.name}`)
-                .setDescription(`**${betTypeNames[betType]}**の購入方法と金額を選択してください`)
-                .setColor(race.type === 'jra' ? 0x00b0f4 : 0xf47200)
+                .setDescription(`**${betTypeNames[session.betType]}**（${methodNames[method]}）購入の金額を選択してください`)
+                .setColor(0x00b0f4)
                 .setTimestamp()
                 .addFields(
-                    { name: '発走時刻', value: race.time },
-                    { name: 'レースID', value: race.id }
+                    { name: '現在のポイント', value: `${user.points}pt` }
                 );
 
-            // 応答を更新
             await interaction.editReply({
-                content: `${betTypeNames[betType]}の購入方法と金額を選択してください。`,
-                embeds: [raceEmbed],
-                components: [methodRow, amountRow, backButton]
+                embeds: [embed],
+                components: [amountRow, backButton]
             });
         } catch (error) {
-            logger.error(`馬券タイプ選択処理中にエラー: ${error}`);
+            logger.error(`購入方法選択処理中にエラー: ${error}`);
             await this.handleError(interaction, error);
         }
     }
-
     /**
-     * 馬券購入方法選択を処理
+     * 馬券金額選択を処理
      * @param {StringSelectMenuInteraction} interaction - インタラクション
      */
-    static async handleMethodSelection(interaction) {
+    static async handleAmountSelection(interaction) {
         try {
             await interaction.deferUpdate().catch(err => {
                 logger.warn(`deferUpdate エラー (無視して続行): ${err}`);
             });
 
-            const customId = interaction.customId;
-            const isAmountSelection = customId.startsWith('bet_select_amount_');
-
             // カスタムIDからパラメータを解析
-            let parts = customId.split('_');
-            let raceId, betType, method, amount;
+            const parts = interaction.customId.split('_');
+            // [0]=bet, [1]=select, [2]=amount, [3]=raceId
+            const raceId = parts[3];
+            const amount = parseInt(interaction.values[0], 10);
 
-            // 金額選択の場合
-            if (isAmountSelection) {
-                // [0]=bet, [1]=select, [2]=amount, [3]=raceId, [4]=betType
-                raceId = parts[3];
-                betType = parts[4];
-                amount = parseInt(interaction.values[0], 10);
+            // セッションを確認・更新
+            if (!global.betSessions) global.betSessions = {};
+            const sessionKey = `${interaction.user.id}_${raceId}`;
+            const session = global.betSessions[sessionKey];
 
-                // セッションから方法を取得（仮にグローバル変数を使用）
-                if (!global.betSessions) global.betSessions = {};
-                method = global.betSessions[`${interaction.user.id}_${raceId}`]?.method || 'normal';
+            if (!session || !session.betType || !session.method) {
+                return await interaction.editReply({
+                    content: 'セッションが失効しました。最初からやり直してください。',
+                    embeds: [],
+                    components: []
+                });
             }
-            // 方法選択の場合
-            else {
-                // [0]=bet, [1]=select, [2]=method, [3]=raceId, [4]=betType
-                raceId = parts[3];
-                betType = parts[4];
-                method = interaction.values[0];
 
-                // セッション保存（仮にグローバル変数を使用）
-                if (!global.betSessions) global.betSessions = {};
-                global.betSessions[`${interaction.user.id}_${raceId}`] = { method };
+            // セッションに金額を追加
+            session.amount = amount;
+            session.timestamp = Date.now();
+            global.betSessions[sessionKey] = session;
 
-                // 金額はデフォルト値
-                amount = 100;
-            }
+            const betType = session.betType;
+            const method = session.method;
 
             // レース情報を取得
             const race = await getRaceById(raceId);
-
             if (!race) {
                 return await interaction.editReply({
                     content: `レースID ${raceId} の情報が見つかりませんでした。`,
@@ -212,7 +346,6 @@ export default class BetHandler {
 
             // ユーザー情報を取得
             const user = await getUser(interaction.user.id);
-
             if (!user) {
                 return await interaction.editReply({
                     content: 'ユーザー情報の取得に失敗しました。',
@@ -255,7 +388,7 @@ export default class BetHandler {
             const backButton = new ActionRowBuilder()
                 .addComponents(
                     new ButtonBuilder()
-                        .setCustomId(`bet_back_to_type_${raceId}`)
+                        .setCustomId(`bet_back_to_method_${raceId}`)
                         .setLabel('購入方法選択に戻る')
                         .setStyle(ButtonStyle.Secondary)
                 );
@@ -275,7 +408,7 @@ export default class BetHandler {
                 components: [selectRow, backButton]
             });
         } catch (error) {
-            logger.error(`購入方法選択処理中にエラー: ${error}`);
+            logger.error(`金額選択処理中にエラー: ${error}`);
             await this.handleError(interaction, error);
         }
     }
@@ -681,9 +814,9 @@ export default class BetHandler {
     }
 
     /**
-     * 「戻る」ボタンの処理
-     * @param {ButtonInteraction} interaction - インタラクション
-     */
+ * 「戻る」ボタンの処理
+ * @param {ButtonInteraction} interaction - インタラクション
+ */
     static async handleBackButton(interaction) {
         try {
             await interaction.deferUpdate().catch(err => {
@@ -700,7 +833,149 @@ export default class BetHandler {
             // 馬券タイプ選択に戻る
             else if (customId.startsWith('bet_back_to_type_')) {
                 const raceId = customId.split('_')[4];
-                await this.navigateToRaceDetail(interaction, raceId, true);
+
+                // レース情報を取得
+                const race = await getRaceById(raceId);
+                if (!race) {
+                    return await interaction.editReply({
+                        content: `レースID ${raceId} の情報が見つかりませんでした。`,
+                        embeds: [],
+                        components: []
+                    });
+                }
+
+                // 馬券種類選択メニュー
+                const betTypeRow = new ActionRowBuilder()
+                    .addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId(`bet_select_type_${raceId}`)
+                            .setPlaceholder('馬券の種類を選択してください')
+                            .addOptions([
+                                { label: '単勝', value: 'tansho', description: '1着になる馬を当てる', emoji: '🥇' },
+                                { label: '複勝', value: 'fukusho', description: '3着以内に入る馬を当てる', emoji: '🏆' },
+                                { label: '枠連', value: 'wakuren', description: '1着と2着になる枠を当てる（順不同）', emoji: '🔢' },
+                                { label: '馬連', value: 'umaren', description: '1着と2着になる馬を当てる（順不同）', emoji: '🐎' },
+                                { label: 'ワイド', value: 'wide', description: '3着以内に入る2頭の馬を当てる（順不同）', emoji: '📊' },
+                                { label: '馬単', value: 'umatan', description: '1着と2着になる馬を当てる（順序通り）', emoji: '🎯' },
+                                { label: '三連複', value: 'sanrenpuku', description: '1着から3着までの馬を当てる（順不同）', emoji: '🔄' },
+                                { label: '三連単', value: 'sanrentan', description: '1着から3着までの馬を当てる（順序通り）', emoji: '💯' }
+                            ])
+                    );
+
+                // 戻るボタン
+                const backButton = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`bet_back_to_race_${raceId}`)
+                            .setLabel('レース詳細に戻る')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+
+                // エンベッド
+                const embed = new EmbedBuilder()
+                    .setTitle(`🏇 馬券購入 - ${race.venue} ${race.number}R ${race.name}`)
+                    .setDescription(`馬券の種類を選択してください`)
+                    .setColor(0x00b0f4)
+                    .setTimestamp();
+
+                await interaction.editReply({
+                    content: 'レース詳細と馬券購入画面です。馬券を購入するには、まず馬券の種類を選択してください。',
+                    embeds: [embed],
+                    components: [betTypeRow, backButton]
+                });
+            }
+            // 購入方法選択に戻る - 追加
+            else if (customId.startsWith('bet_back_to_method_')) {
+                const raceId = customId.split('_')[4];
+
+                // セッションを確認
+                if (!global.betSessions) global.betSessions = {};
+                const sessionKey = `${interaction.user.id}_${raceId}`;
+                const session = global.betSessions[sessionKey];
+
+                if (!session || !session.betType) {
+                    return await interaction.editReply({
+                        content: 'セッションが失効しました。最初からやり直してください。',
+                        embeds: [],
+                        components: []
+                    });
+                }
+
+                const betType = session.betType;
+
+                // レース情報を取得
+                const race = await getRaceById(raceId);
+                if (!race) {
+                    return await interaction.editReply({
+                        content: `レースID ${raceId} の情報が見つかりませんでした。`,
+                        embeds: [],
+                        components: []
+                    });
+                }
+
+                // 購入方法選択メニュー
+                const options = [];
+
+                // 単勝・複勝は通常購入のみ
+                if (betType === 'tansho' || betType === 'fukusho') {
+                    options.push({
+                        label: '通常',
+                        value: 'normal',
+                        description: `${betTypeNames[betType]}: 選択した馬を購入`,
+                        emoji: '🎫'
+                    });
+                } else {
+                    // 他の馬券タイプは通常・ボックス・フォーメーション
+                    options.push({
+                        label: '通常',
+                        value: 'normal',
+                        description: `${betTypeNames[betType]}: 選択した馬(枠)を購入`,
+                        emoji: '🎫'
+                    });
+
+                    options.push({
+                        label: 'ボックス',
+                        value: 'box',
+                        description: `${betTypeNames[betType]}: 選択した馬(枠)の組み合わせを購入`,
+                        emoji: '📦'
+                    });
+
+                    options.push({
+                        label: 'フォーメーション',
+                        value: 'formation',
+                        description: `${betTypeNames[betType]}: 1着~3着を軸馬と相手馬で購入`,
+                        emoji: '📊'
+                    });
+                }
+
+                const methodRow = new ActionRowBuilder()
+                    .addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId(`bet_select_method_${raceId}`)
+                            .setPlaceholder('購入方法を選択してください')
+                            .addOptions(options)
+                    );
+
+                // 戻るボタン
+                const backButton = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`bet_back_to_type_${raceId}`)
+                            .setLabel('馬券種類選択に戻る')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+
+                // エンベッド
+                const embed = new EmbedBuilder()
+                    .setTitle(`🏇 馬券購入 - ${race.venue} ${race.number}R ${race.name}`)
+                    .setDescription(`**${betTypeNames[betType]}**の購入方法を選択してください`)
+                    .setColor(0x00b0f4)
+                    .setTimestamp();
+
+                await interaction.editReply({
+                    embeds: [embed],
+                    components: [methodRow, backButton]
+                });
             }
             else {
                 await interaction.editReply({

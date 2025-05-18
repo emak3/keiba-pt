@@ -914,7 +914,7 @@ async function displayVenueRaces(interaction, venueCode, dateString, allRaces) {
 }
 
 /**
- * レース詳細と馬券購入画面を表示
+ * レース詳細と馬券購入画面を表示（終了レースは結果表示）
  * @param {MessageComponentInteraction} interaction - インタラクション
  * @param {string} raceId - レースID
  * @param {boolean} showBetMenu - 馬券購入メニューを表示するかどうか
@@ -932,13 +932,9 @@ async function displayRaceDetail(interaction, raceId, showBetMenu = false) {
       });
     }
 
-    // レースステータスチェック
+    // レースステータスチェック - 修正: 終了していても結果を表示する
     if (race.status === 'completed') {
-      return await safeEditReply(interaction, {
-        content: `このレースは既に終了しています。結果は \`/result ${raceId}\` で確認できます。`,
-        embeds: [],
-        components: []
-      });
+      return await displayRaceResult(interaction, raceId, race);
     }
 
     // レース発走時間の2分前かどうかをチェック
@@ -1055,6 +1051,174 @@ async function displayRaceDetail(interaction, raceId, showBetMenu = false) {
       content: '詳細の取得中にエラーが発生しました。', 
       embeds: [], 
       components: [] 
+    });
+  }
+}
+
+/**
+ * 終了したレースの結果と払戻情報を表示する
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ * @param {string} raceId - レースID
+ * @param {Object} race - レース情報
+ */
+async function displayRaceResult(interaction, raceId, race) {
+  try {
+    await safeEditReply(interaction, {
+      content: `レース結果を取得中...`,
+      embeds: [],
+      components: []
+    });
+
+    // レース結果を取得
+    let resultData = null;
+    
+    if (race.type === 'jra') {
+      // JRAレース結果取得
+      const { fetchJraRaceResults } = await import('../services/scraper/jraScraper.js');
+      resultData = await fetchJraRaceResults(raceId);
+    } else {
+      // NARレース結果取得
+      const { fetchNarRaceResults } = await import('../services/scraper/narScraper.js');
+      resultData = await fetchNarRaceResults(raceId);
+    }
+    
+    if (!resultData) {
+      return await safeEditReply(interaction, {
+        content: `レース ${raceId} の結果情報が見つかりませんでした。\`/result ${raceId}\` コマンドを試してください。`,
+        embeds: [],
+        components: []
+      });
+    }
+
+    // レースデータを処理し、クリーニング
+    const textCleaner = await import('../utils/textCleaner.js');
+    const cleanedVenue = textCleaner.cleanVenueName(race.venue);
+    const cleanedName = textCleaner.cleanRaceName(race.name, cleanedVenue, race.number);
+    
+    // メインの結果エンベッド
+    const resultEmbed = new EmbedBuilder()
+      .setTitle(`🏁 ${cleanedVenue} ${race.number}R ${cleanedName} - 結果`)
+      .setDescription(`レース結果と払戻金の情報です。`)
+      .setColor(race.type === 'jra' ? 0x00b0f4 : 0xf47200)
+      .setTimestamp();
+    
+    // 着順情報
+    let resultText = '';
+    
+    if (resultData.results && resultData.results.length > 0) {
+      resultText = '**【着順】**\n';
+      
+      const sortedResults = [...resultData.results].sort((a, b) => a.order - b.order);
+      
+      sortedResults.slice(0, 5).forEach(result => {
+        resultText += `${result.order}着: ${result.frameNumber}枠 ${result.horseNumber}番 ${result.horseName} (${result.jockey})\n`;
+      });
+    } else {
+      resultText = '**【着順情報】**\n着順情報はまだ利用できません。';
+    }
+    
+    resultEmbed.addFields({ name: '結果', value: resultText });
+    
+    // 払戻情報のエンベッド
+    const payoutEmbed = new EmbedBuilder()
+      .setTitle(`💰 ${race.venue} ${race.number}R ${race.name} - 払戻金`)
+      .setColor(race.type === 'jra' ? 0x00b0f4 : 0xf47200)
+      .setTimestamp();
+    
+    // 払戻情報の整形
+    let payoutText = '';
+    const payouts = resultData.payouts;
+    
+    // 単勝
+    if (payouts?.tansho && payouts.tansho.length > 0) {
+      const tansho = payouts.tansho[0];
+      payoutText += `**単勝**: ${tansho.numbers.join('-')} (${tansho.popularity}人気) → ${tansho.payout}円\n\n`;
+    }
+    
+    // 複勝
+    if (payouts?.fukusho && payouts.fukusho.length > 0) {
+      payoutText += '**複勝**: ';
+      payouts.fukusho.forEach((fukusho, index) => {
+        payoutText += `${fukusho.numbers.join('-')} (${fukusho.popularity}人気) → ${fukusho.payout}円`;
+        if (index < payouts.fukusho.length - 1) {
+          payoutText += ' / ';
+        }
+      });
+      payoutText += '\n\n';
+    }
+    
+    // 枠連
+    if (payouts?.wakuren && payouts.wakuren.length > 0) {
+      const wakuren = payouts.wakuren[0];
+      payoutText += `**枠連**: ${wakuren.numbers.join('-')} (${wakuren.popularity}人気) → ${wakuren.payout}円\n\n`;
+    }
+    
+    // 馬連
+    if (payouts?.umaren && payouts.umaren.length > 0) {
+      const umaren = payouts.umaren[0];
+      payoutText += `**馬連**: ${umaren.numbers.join('-')} (${umaren.popularity}人気) → ${umaren.payout}円\n\n`;
+    }
+    
+    // ワイド
+    if (payouts?.wide && payouts.wide.length > 0) {
+      payoutText += '**ワイド**: ';
+      payouts.wide.forEach((wide, index) => {
+        const horseNumbers = Array.isArray(wide.numbers) ? wide.numbers : [];
+        payoutText += `${horseNumbers.join('-')} (${wide.popularity}人気) → ${wide.payout}円`;
+        if (index < payouts.wide.length - 1) {
+          payoutText += ' / ';
+        }
+      });
+      payoutText += '\n\n';
+    }
+    
+    // 馬単
+    if (payouts?.umatan && payouts.umatan.length > 0) {
+      const umatan = payouts.umatan[0];
+      payoutText += `**馬単**: ${umatan.numbers.join('→')} (${umatan.popularity}人気) → ${umatan.payout}円\n\n`;
+    }
+    
+    // 三連複
+    if (payouts?.sanrenpuku && payouts.sanrenpuku.length > 0) {
+      const sanrenpuku = payouts.sanrenpuku[0];
+      payoutText += `**三連複**: ${sanrenpuku.numbers.join('-')} (${sanrenpuku.popularity}人気) → ${sanrenpuku.payout}円\n\n`;
+    }
+    
+    // 三連単
+    if (payouts?.sanrentan && payouts.sanrentan.length > 0) {
+      const sanrentan = payouts.sanrentan[0];
+      payoutText += `**三連単**: ${sanrentan.numbers.join('→')} (${sanrentan.popularity}人気) → ${sanrentan.payout}円`;
+    }
+    
+    // 払戻情報がない場合
+    if (!payoutText) {
+      payoutText = '払戻情報はまだ利用できません。';
+    }
+    
+    payoutEmbed.setDescription(payoutText);
+    
+    // 戻るボタン
+    const backRow = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(`races_back_${race.date}`)
+          .setLabel('レース一覧に戻る')
+          .setStyle(ButtonStyle.Secondary)
+      );
+    
+    // レスポンスを送信
+    await safeEditReply(interaction, {
+      content: `${race.venue} ${race.number}R ${race.name} の結果と払戻金です。`,
+      embeds: [resultEmbed, payoutEmbed],
+      components: [backRow]
+    });
+    
+  } catch (error) {
+    logger.error(`レース結果表示中にエラーが発生しました: ${error}`);
+    await safeEditReply(interaction, {
+      content: `レース結果の取得中にエラーが発生しました。\`/result ${raceId}\` コマンドを試してください。`,
+      embeds: [],
+      components: []
     });
   }
 }

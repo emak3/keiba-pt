@@ -12,63 +12,66 @@ export async function setupInteractionHandlers(client) {
     try {
       // スラッシュコマンドの処理は別途行われているため、ここでは処理しない
       if (interaction.isChatInputCommand()) return;
-      
+
       // 馬券タイプ選択のインタラクション
       if (interaction.isStringSelectMenu() && interaction.customId.startsWith('bet_select_type_')) {
         await BetHandler.handleBetTypeSelection(interaction);
       }
-      
+
       // 購入方法選択のインタラクション 
-      else if (interaction.isStringSelectMenu() && (
-        interaction.customId.startsWith('bet_select_method_') || 
-        interaction.customId.startsWith('bet_select_amount_')
-      )) {
+      else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('bet_select_method_')) {
         await BetHandler.handleMethodSelection(interaction);
       }
-      
+
+      // 金額選択のインタラクション - 追加
+      else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('bet_select_amount_')) {
+        await BetHandler.handleAmountSelection(interaction);
+      }
+
       // 馬番選択のインタラクション
       else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('bet_select_horses_')) {
         await BetHandler.handleHorseSelection(interaction);
       }
-      
+
       // 馬券購入確認ボタン
       else if (interaction.isButton() && interaction.customId.startsWith('bet_confirm_')) {
         await BetHandler.handleBetConfirmation(interaction);
       }
-      
-      // 「戻る」ボタン
+
+      // 「戻る」ボタン 
       else if (interaction.isButton() && (
-        interaction.customId.startsWith('bet_back_to_race_') || 
-        interaction.customId.startsWith('bet_back_to_type_')
+        interaction.customId.startsWith('bet_back_to_race_') ||
+        interaction.customId.startsWith('bet_back_to_type_') ||
+        interaction.customId.startsWith('bet_back_to_method_') // 追加: 購入方法選択に戻る
       )) {
         await BetHandler.handleBackButton(interaction);
       }
-      
+
       // キャンセルボタン
       else if (interaction.isButton() && interaction.customId.startsWith('bet_cancel_')) {
         await BetHandler.handleBetConfirmation(interaction);
       }
-      
+
       // マイページを開くボタン
       else if (interaction.isButton() && interaction.customId === 'mypage_open') {
         await BetHandler.handleMypageButton(interaction, client);
       }
-      
+
       // マイページの更新ボタン
       else if (interaction.isButton() && interaction.customId === 'mypage_refresh') {
         await handleMypageRefresh(interaction);
       }
-      
+
       // マイページの履歴をもっと見るボタン
       else if (interaction.isButton() && interaction.customId === 'mypage_more_history') {
         await handleMypageMoreHistory(interaction);
       }
-      
+
       // フォーメーション馬券のモーダル送信
       else if (interaction.isModalSubmit() && interaction.customId.startsWith('bet_formation_')) {
         await BetHandler.handleFormationBet(interaction);
       }
-      
+
       // races.js からのインタラクション
       else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('races_select_venue_')) {
         // races.js で処理されるのでスキップ
@@ -88,7 +91,7 @@ export async function setupInteractionHandlers(client) {
       }
     } catch (error) {
       logger.error(`インタラクション処理中にエラーが発生しました: ${error}`);
-      
+
       try {
         // インタラクションの状態に合わせて適切な方法でエラーを通知
         if (interaction.replied) {
@@ -111,7 +114,7 @@ export async function setupInteractionHandlers(client) {
       }
     }
   });
-  
+
   logger.info('インタラクションハンドラーを設定しました。');
 }
 
@@ -122,7 +125,7 @@ export async function setupInteractionHandlers(client) {
 async function handleMypageRefresh(interaction) {
   try {
     await interaction.deferUpdate();
-    
+
     // 最新のユーザー情報を取得
     const user = await getUser(interaction.user.id);
     if (!user) {
@@ -132,10 +135,10 @@ async function handleMypageRefresh(interaction) {
         components: []
       });
     }
-    
+
     // 馬券履歴を取得
     const bets = await getUserBets(interaction.user.id, 10);
-    
+
     // ユーザー情報のエンベッド
     const userEmbed = new EmbedBuilder()
       .setTitle(`${interaction.user.username} さんのマイページ`)
@@ -146,18 +149,18 @@ async function handleMypageRefresh(interaction) {
         { name: '現在のポイント', value: `${user.points}pt` },
         { name: '登録日', value: formatDate(user.createdAt) }
       );
-    
+
     // 馬券履歴のエンベッド
     const betHistoryEmbed = new EmbedBuilder()
       .setTitle(`${interaction.user.username} さんの馬券購入履歴`)
       .setColor(0x00b0f4)
       .setFooter({ text: `1ページ（最新の10件）` })
       .setTimestamp();
-    
+
     // 馬券履歴の整形
     const betHistoryText = formatBetHistory(bets);
     betHistoryEmbed.setDescription(betHistoryText);
-    
+
     // ボタン
     const row = new ActionRowBuilder()
       .addComponents(
@@ -170,7 +173,7 @@ async function handleMypageRefresh(interaction) {
           .setLabel('履歴をもっと見る')
           .setStyle(ButtonStyle.Secondary)
       );
-    
+
     await interaction.editReply({
       content: `${interaction.user.username} さんのマイページ（更新済み）`,
       embeds: [userEmbed, betHistoryEmbed],
@@ -192,7 +195,7 @@ async function handleMypageRefresh(interaction) {
 async function handleMypageMoreHistory(interaction) {
   try {
     await interaction.deferUpdate();
-    
+
     // ユーザー情報を取得
     const user = await getUser(interaction.user.id);
     if (!user) {
@@ -202,11 +205,11 @@ async function handleMypageMoreHistory(interaction) {
         components: []
       });
     }
-    
+
     // 馬券履歴を取得（30件）
     const moreHistoryLimit = 30;
     const moreBets = await getUserBets(interaction.user.id, moreHistoryLimit);
-    
+
     // ユーザー情報のエンベッド
     const userEmbed = new EmbedBuilder()
       .setTitle(`${interaction.user.username} さんのマイページ`)
@@ -217,18 +220,18 @@ async function handleMypageMoreHistory(interaction) {
         { name: '現在のポイント', value: `${user.points}pt` },
         { name: '登録日', value: formatDate(user.createdAt) }
       );
-    
+
     // 馬券履歴のエンベッド
     const moreHistoryEmbed = new EmbedBuilder()
       .setTitle(`${interaction.user.username} さんの馬券購入履歴（詳細）`)
       .setColor(0x00b0f4)
       .setFooter({ text: `詳細表示（最新の${moreHistoryLimit}件）` })
       .setTimestamp();
-    
+
     // 馬券履歴の整形
     const moreHistoryText = formatBetHistory(moreBets);
     moreHistoryEmbed.setDescription(moreHistoryText);
-    
+
     // ボタン
     const row = new ActionRowBuilder()
       .addComponents(
@@ -241,7 +244,7 @@ async function handleMypageMoreHistory(interaction) {
           .setLabel('履歴をもっと見る')
           .setStyle(ButtonStyle.Secondary)
       );
-    
+
     await interaction.editReply({
       content: `${interaction.user.username} さんのマイページ（詳細表示）`,
       embeds: [userEmbed, moreHistoryEmbed],
@@ -287,16 +290,16 @@ function formatBetHistory(bets) {
     sanrenpuku: '三連複',
     sanrentan: '三連単'
   };
-  
+
   const methodNames = {
     normal: '通常',
     box: 'ボックス',
     formation: 'フォーメーション'
   };
-  
+
   // 馬券履歴の整形
   let betHistoryText = '';
-  
+
   if (bets.length === 0) {
     betHistoryText = '馬券購入履歴はありません。';
   } else {
@@ -308,27 +311,27 @@ function formatBetHistory(bets) {
       } else {
         selectionsDisplay = bet.selections.join('-');
       }
-      
+
       // レース情報
-      const raceInfo = bet.race ? 
-        `${bet.race.date.slice(0, 4)}/${bet.race.date.slice(4, 6)}/${bet.race.date.slice(6, 8)} ${bet.race.venue} ${bet.race.number}R ${bet.race.name}` : 
+      const raceInfo = bet.race ?
+        `${bet.race.date.slice(0, 4)}/${bet.race.date.slice(4, 6)}/${bet.race.date.slice(6, 8)} ${bet.race.venue} ${bet.race.number}R ${bet.race.name}` :
         'レース情報なし';
-      
+
       // 払戻情報
       let payoutInfo = '';
       if (bet.status === 'processed') {
-        payoutInfo = bet.payout > 0 ? 
-          `✅ **${bet.payout}pt獲得!**` : 
+        payoutInfo = bet.payout > 0 ?
+          `✅ **${bet.payout}pt獲得!**` :
           '❌ はずれ';
       } else {
         payoutInfo = '⏳ 結果待ち';
       }
-      
+
       betHistoryText += `**${index + 1}. ${raceInfo}**\n`;
       betHistoryText += `${betTypeNames[bet.betType] || bet.betType}（${methodNames[bet.method] || bet.method}）: ${selectionsDisplay}\n`;
       betHistoryText += `購入: ${bet.amount}pt / ${payoutInfo}\n\n`;
     });
   }
-  
+
   return betHistoryText;
 }
