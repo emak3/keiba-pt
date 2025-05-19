@@ -272,7 +272,7 @@ export function createConfirmEmbed(race, betType, method, selectedHorses, amount
         const combinationCount = Math.round(totalCost / amount);
         combinationInfo = `\n組み合わせ数: ${combinationCount}通り`;
     }
-    
+
     return new EmbedBuilder()
         .setTitle(`🏇 馬券購入確認 - ${race.venue} ${race.number}R ${race.name}`)
         .setDescription(`**${betTypeNames[betType]}**（${methodNames[method]}）の購入を確定しますか？`)
@@ -380,6 +380,57 @@ export function getMinSelectionsForBet(betType) {
     };
 
     return minSelections[betType] || 1;
+}
+
+// フォーメーション馬券確認用エンベッド
+export function createFormationConfirmEmbed(race, betType, selections, amount, totalCost, userPoints, combinationCount) {
+    // フォーメーション選択の表示
+    let selectionsDisplay = '';
+    
+    if (betType === 'umatan') {
+        const firstPositions = selections[0].join(',');
+        const secondPositions = selections[1].join(',');
+        selectionsDisplay = `1着: ${firstPositions} → 2着: ${secondPositions}`;
+    } else if (betType === 'sanrentan') {
+        const firstPositions = selections[0].join(',');
+        const secondPositions = selections[1].join(',');
+        const thirdPositions = selections[2].join(',');
+        selectionsDisplay = `1着: ${firstPositions} → 2着: ${secondPositions} → 3着: ${thirdPositions}`;
+    } else {
+        // 馬連・三連複・ワイド
+        const keyHorses = selections[0].join(',');
+        const partnerHorses = selections[1].join(',');
+        selectionsDisplay = `軸馬: ${keyHorses} × 相手馬: ${partnerHorses}`;
+    }
+    
+    return new EmbedBuilder()
+        .setTitle(`🏇 馬券購入確認 - ${race.venue} ${race.number}R ${race.name}`)
+        .setDescription(`**${betTypeNames[betType]}**（フォーメーション）の購入を確定しますか？`)
+        .setColor(0x00b0f4)
+        .setTimestamp()
+        .addFields(
+            { name: 'フォーメーション詳細', value: selectionsDisplay },
+            { name: '購入金額', value: `${amount}pt × ${combinationCount}通り = ${totalCost}pt` },
+            { name: '残りポイント', value: `${userPoints}pt → ${userPoints - totalCost}pt` }
+        );
+}
+
+// フォーメーション購入確認ボタン
+export function createFormationConfirmButton(raceId, betType, amount, selections) {
+    // 選択をJSON文字列にして保存（カスタムIDの長さ制限があるため）
+    const selectionsJson = JSON.stringify(selections);
+    // セッションに保存するようにする
+    return new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId(`bet_formation_confirm_${raceId}_${betType}_${amount}`)
+                .setLabel('馬券を購入する')
+                .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId(`bet_cancel_${raceId}`)
+                .setLabel('キャンセル')
+                .setStyle(ButtonStyle.Secondary)
+        );
 }
 
 /**

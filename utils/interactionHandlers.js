@@ -46,7 +46,18 @@ export async function setupInteractionHandlers(client) {
       )) {
         await BetHandler.handleBackButton(interaction);
       }
-
+      else if (interaction.isStringSelectMenu() && (
+        interaction.customId.startsWith('bet_formation_first_') ||
+        interaction.customId.startsWith('bet_formation_second_') ||
+        interaction.customId.startsWith('bet_formation_third_') ||
+        interaction.customId.startsWith('bet_formation_key_') ||
+        interaction.customId.startsWith('bet_formation_partner_')
+      )) {
+        await BetHandler.handleFormationPositionSelection(interaction);
+      }
+      else if (interaction.isButton() && interaction.customId.startsWith('bet_formation_confirm_')) {
+        await BetHandler.handleFormationConfirmation(interaction);
+      }
       // キャンセルボタン
       else if (interaction.isButton() && interaction.customId.startsWith('bet_cancel_')) {
         await BetHandler.handleBetConfirmation(interaction);

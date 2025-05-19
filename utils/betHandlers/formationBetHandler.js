@@ -18,56 +18,519 @@ import * as betUtils from '../betUI/betUtils.js';
  * @param {string} raceId - レースID
  * @param {string} betType - 馬券タイプ
  */
-export async function startFormationBet(interaction, raceId, betType) {
+export async function startFormationBet(interaction, raceId, betType, amount) {
     try {
+        await betUtils.safeDeferUpdate(interaction);
         // レース情報を取得
         const race = await getRaceById(raceId);
         if (!race) {
-            return await interaction.editReply({
+            return await interaction.reply({
                 content: `レース情報の取得に失敗しました。`,
-                components: []
+                ephemeral: true
             });
         }
-        
+
         // ユーザー情報を取得
         const user = await getUser(interaction.user.id);
         if (!user) {
-            return await interaction.editReply({
+            return await interaction.reply({
                 content: 'ユーザー情報の取得に失敗しました。',
-                components: []
+                ephemeral: true
             });
         }
-        
-        // セッション情報を更新 - タイムスタンプを更新して有効期限をリセット
+
+        // セッション情報を更新
         betUtils.updateSession(interaction.user.id, raceId, {
             method: 'formation',
-            timestamp: Date.now() // 明示的にタイムスタンプを更新
+            amount: amount,
+            formationStep: 'first', // フォーメーションのステップを追加
+            selections: [] // 選択した馬番を保存する配列
         });
-        
-        // フォーメーション購入用のモーダルを作成
-        const modal = betModalBuilder.createFormationModal(
-            `bet_formation_${raceId}_${betType}`,
-            betType,
-            race
-        );
-        
-        // モーダル表示前にインタラクションの状態をログ
-        logger.debug(`モーダル表示前のインタラクション状態: replied=${interaction.replied}, deferred=${interaction.deferred}`);
-        
-        // 安全にモーダルを表示
-        if (!interaction.replied && !interaction.deferred) {
-            await interaction.showModal(modal);
+
+        if (betType === 'umatan' || betType === 'sanrentan') {
+            // 順序あり馬券（馬単・三連単）の場合は1着の馬を選択
+            await showFirstPositionMenu(interaction, race, raceId, betType, amount);
         } else {
-            // すでに応答済みの場合は編集して通知
-            await betUtils.safeUpdateInteraction(interaction, {
-                content: 'フォーメーション購入用のフォームを表示します。もう一度操作してください。',
-                components: []
-            });
+            // 順序なし馬券（馬連・三連複など）の場合は軸馬の選択
+            await showKeyHorseMenu(interaction, race, raceId, betType, amount);
         }
     } catch (error) {
         logger.error(`フォーメーション購入開始エラー: ${error}`);
         await betUtils.handleError(interaction, error);
     }
+}
+
+// 1着の馬選択メニューを表示
+async function showFirstPositionMenu(interaction, race, raceId, betType, amount) {
+    // 1着の馬選択用のメニュー構築
+    const firstPositionMenu = createPositionSelectionMenu(
+        race.horses,
+        `bet_formation_first_${raceId}_${betType}_${amount}`,
+        "1着の馬を選択してください（複数選択可）",
+        5 // 最大選択数
+    );
+
+    const backButton = betMenuBuilder.createBackButton(
+        `bet_back_to_method_${raceId}`,
+        '購入方法選択に戻る'
+    );
+
+    await betUtils.safeUpdateInteraction(interaction, {
+        content: `**${betUtils.betTypeNames[betType]}**（フォーメーション）- 1着の馬を選択してください`,
+        components: [firstPositionMenu, backButton]
+    });
+}
+
+async function showSecondPositionMenu(interaction, race, raceId, betType, amount, firstSelectedHorses) {
+    try {
+        // 1着に選択された馬を除外したリストを作成
+        const availableHorses = race.horses.filter(horse => 
+            !horse.isCanceled && !firstSelectedHorses.includes(horse.horseNumber)
+        );
+        
+        // 2着の馬選択用のメニュー構築
+        const secondPositionMenu = createPositionSelectionMenu(
+            availableHorses,
+            `bet_formation_second_${raceId}_${betType}_${amount}`,
+            "2着の馬を選択してください（複数選択可）",
+            5 // 最大選択数
+        );
+
+        // 戻るボタン（1着選択に戻る）
+        const backButton = betMenuBuilder.createBackButton(
+            `bet_back_to_first_selection_${raceId}`,
+            '1着選択に戻る'
+        );
+
+        // 選択された1着馬の表示用テキスト
+        const firstSelectedText = firstSelectedHorses.map(horseNumber => {
+            const horse = race.horses.find(h => h.horseNumber === horseNumber);
+            return horse ? 
+                `${horseNumber}番: ${horse.horseName}` : 
+                `${horseNumber}番`;
+        }).join(', ');
+
+        await betUtils.safeUpdateInteraction(interaction, {
+            content: `**${betUtils.betTypeNames[betType]}**（フォーメーション）\n1着の選択: **${firstSelectedText}**\n2着の馬を選択してください（1着に選択した馬は除外されています）`,
+            components: [secondPositionMenu, backButton]
+        });
+    } catch (error) {
+        logger.error(`2着馬選択メニュー表示エラー: ${error}`);
+        await betUtils.handleError(interaction, error);
+    }
+}
+
+async function showThirdPositionMenu(interaction, race, raceId, betType, amount, previousSelections) {
+    try {
+        // 1着と2着に選択された馬を除外
+        const firstSelectedHorses = previousSelections[0];
+        const secondSelectedHorses = previousSelections[1];
+        const alreadySelectedHorses = [...firstSelectedHorses, ...secondSelectedHorses];
+        
+        const availableHorses = race.horses.filter(horse => 
+            !horse.isCanceled && !alreadySelectedHorses.includes(horse.horseNumber)
+        );
+        
+        // 3着の馬選択用のメニュー構築
+        const thirdPositionMenu = createPositionSelectionMenu(
+            availableHorses,
+            `bet_formation_third_${raceId}_${betType}_${amount}`,
+            "3着の馬を選択してください（複数選択可）",
+            5 // 最大選択数
+        );
+
+        // 戻るボタン（2着選択に戻る）
+        const backButton = betMenuBuilder.createBackButton(
+            `bet_back_to_second_selection_${raceId}`,
+            '2着選択に戻る'
+        );
+
+        // 選択された1着と2着馬の表示用テキスト
+        const firstSelectedText = firstSelectedHorses.map(horseNumber => {
+            const horse = race.horses.find(h => h.horseNumber === horseNumber);
+            return horse ? 
+                `${horseNumber}番: ${horse.horseName}` : 
+                `${horseNumber}番`;
+        }).join(', ');
+
+        const secondSelectedText = secondSelectedHorses.map(horseNumber => {
+            const horse = race.horses.find(h => h.horseNumber === horseNumber);
+            return horse ? 
+                `${horseNumber}番: ${horse.horseName}` : 
+                `${horseNumber}番`;
+        }).join(', ');
+
+        await betUtils.safeUpdateInteraction(interaction, {
+            content: `**${betUtils.betTypeNames[betType]}**（フォーメーション）\n1着の選択: **${firstSelectedText}**\n2着の選択: **${secondSelectedText}**\n3着の馬を選択してください（1着・2着に選択した馬は除外されています）`,
+            components: [thirdPositionMenu, backButton]
+        });
+    } catch (error) {
+        logger.error(`3着馬選択メニュー表示エラー: ${error}`);
+        await betUtils.handleError(interaction, error);
+    }
+}
+
+// 軸馬選択メニューを表示
+async function showKeyHorseMenu(interaction, race, raceId, betType, amount) {
+    // 軸馬選択用のメニュー構築
+    const keyHorseMenu = createPositionSelectionMenu(
+        race.horses,
+        `bet_formation_key_${raceId}_${betType}_${amount}`,
+        "軸馬を選択してください（複数選択可）",
+        3 // 最大選択数
+    );
+
+    const backButton = betMenuBuilder.createBackButton(
+        `bet_back_to_method_${raceId}`,
+        '購入方法選択に戻る'
+    );
+
+    await betUtils.safeUpdateInteraction(interaction, {
+        content: `**${betUtils.betTypeNames[betType]}**（フォーメーション）- 軸馬を選択してください`,
+        components: [keyHorseMenu, backButton]
+    });
+}
+
+// 相手馬選択メニューを表示（馬連・三連複・ワイド用）
+async function showPartnerHorseMenu(interaction, race, raceId, betType, amount, keyHorses) {
+    try {
+        // 軸馬を除外したリストを作成
+        const availableHorses = race.horses.filter(horse => 
+            !horse.isCanceled && !keyHorses.includes(horse.horseNumber)
+        );
+        
+        // 相手馬選択用のメニュー構築
+        const partnerMenu = createPositionSelectionMenu(
+            availableHorses,
+            `bet_formation_partner_${raceId}_${betType}_${amount}`,
+            "相手馬を選択してください（複数選択可）",
+            10 // 最大選択数
+        );
+
+        // 戻るボタン（軸馬選択に戻る）
+        const backButton = betMenuBuilder.createBackButton(
+            `bet_back_to_key_selection_${raceId}`,
+            '軸馬選択に戻る'
+        );
+
+        // 選択された軸馬の表示用テキスト
+        const keyHorsesText = keyHorses.map(horseNumber => {
+            const horse = race.horses.find(h => h.horseNumber === horseNumber);
+            return horse ? 
+                `${horseNumber}番: ${horse.horseName}` : 
+                `${horseNumber}番`;
+        }).join(', ');
+
+        // 馬券タイプに応じたガイダンス
+        let guidance = '';
+        if (betType === 'umaren' || betType === 'wide') {
+            guidance = '相手馬を複数選択することで、軸馬と各相手馬の組み合わせが購入できます。';
+        } else if (betType === 'sanrenpuku') {
+            guidance = '相手馬を複数選択することで、1着~3着のいずれかに軸馬、残りに相手馬という組み合わせが購入できます。';
+        }
+
+        await betUtils.safeUpdateInteraction(interaction, {
+            content: `**${betUtils.betTypeNames[betType]}**（フォーメーション）\n軸馬の選択: **${keyHorsesText}**\n相手馬を選択してください（軸馬は除外されています）\n\n${guidance}`,
+            components: [partnerMenu, backButton]
+        });
+    } catch (error) {
+        logger.error(`相手馬選択メニュー表示エラー: ${error}`);
+        await betUtils.handleError(interaction, error);
+    }
+}
+
+// 馬番選択メニュー作成関数
+function createPositionSelectionMenu(horses, customId, placeholder, maxValues) {
+    return new ActionRowBuilder()
+        .addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId(customId)
+                .setPlaceholder(placeholder)
+                .setMinValues(1)
+                .setMaxValues(maxValues)
+                .addOptions(betMenuBuilder.createHorseOptions(horses))
+        );
+}
+
+// フォーメーション馬券購入確認ボタンの処理
+export async function handleFormationConfirmation(interaction) {
+    try {
+        await betUtils.safeDeferUpdate(interaction);
+
+        // カスタムIDからパラメータを解析
+        const parts = interaction.customId.split('_');
+        // [0]=bet, [1]=formation, [2]=confirm, [3]=raceId, [4]=betType, [5]=amount
+        const raceId = parts[3];
+        const betType = parts[4];
+        const amount = parseInt(parts[5], 10);
+
+        // セッションからフォーメーション情報を取得
+        const session = betUtils.getSession(interaction.user.id, raceId);
+        if (!session || !session.selections) {
+            return await betUtils.safeUpdateInteraction(interaction, {
+                content: 'セッションが失効しました。最初からやり直してください。',
+                components: []
+            });
+        }
+
+        const selections = session.selections;
+
+        // レース情報を取得
+        const race = await getRaceById(raceId);
+        if (!race) {
+            return await betUtils.safeUpdateInteraction(interaction, {
+                content: `レース情報の取得に失敗しました。`,
+                components: []
+            });
+        }
+
+        // 組み合わせ数計算
+        let combinationCount = 0;
+        if (betType === 'umatan' || betType === 'sanrentan') {
+            // 順序あり馬券
+            combinationCount = selections.reduce((acc, array) => acc * array.length, 1);
+        } else {
+            // 順序なし馬券
+            const keyHorses = selections[0].length;
+            const partnerHorses = selections[1].length;
+            const requiredHorses = betUtils.getRequiredSelections(betType);
+            
+            if (requiredHorses === 2) {
+                // 馬連・ワイド
+                combinationCount = keyHorses * partnerHorses;
+            } else {
+                // 三連複 - 組み合わせ計算
+                // 3頭のうち1頭が軸馬、残り2頭が相手馬から選ばれる
+                combinationCount = keyHorses * betUtils.calculateCombination(partnerHorses, 2);
+            }
+        }
+
+        // 合計金額を計算
+        const totalCost = amount * combinationCount;
+
+        // 馬券購入処理
+        try {
+            const bet = await placeBet(
+                interaction.user.id,
+                raceId,
+                betType,
+                selections,
+                'formation',
+                totalCost // 注意: 合計金額で購入
+            );
+
+            // フォーメーション選択の表示
+            let selectionsDisplay = '';
+            
+            if (betType === 'umatan') {
+                selectionsDisplay = `1着: ${selections[0].join(',')} → 2着: ${selections[1].join(',')}`;
+            } else if (betType === 'sanrentan') {
+                selectionsDisplay = `1着: ${selections[0].join(',')} → 2着: ${selections[1].join(',')} → 3着: ${selections[2].join(',')}`;
+            } else {
+                // 馬連・三連複・ワイド
+                selectionsDisplay = `軸馬: ${selections[0].join(',')} × 相手馬: ${selections[1].join(',')}`;
+            }
+
+            // 購入結果を表示
+            const user = await getUser(interaction.user.id);
+            const resultEmbed = betMenuBuilder.createResultEmbed(
+                race,
+                betType,
+                'formation',
+                selections,
+                totalCost, // 合計金額
+                user.points,
+                selectionsDisplay
+            );
+
+            // 戻るボタン
+            const backButton = betMenuBuilder.createBackButton(
+                `bet_back_to_race_${raceId}`,
+                'レース詳細に戻る'
+            );
+
+            await betUtils.safeUpdateInteraction(interaction, {
+                content: `馬券の購入が完了しました！（フォーメーション購入: ${combinationCount}通り）`,
+                embeds: [resultEmbed],
+                components: [backButton]
+            });
+
+        } catch (error) {
+            logger.error(`フォーメーション馬券購入処理中にエラー: ${error}`);
+            await betUtils.safeUpdateInteraction(interaction, {
+                content: `馬券購入中にエラーが発生しました: ${error.message}`,
+                components: []
+            });
+        }
+    } catch (error) {
+        logger.error(`フォーメーション確認処理中にエラー: ${error}`);
+        await betUtils.handleError(interaction, error);
+    }
+}
+
+// 馬番選択処理関数（新規追加）
+export async function handlePositionSelection(interaction) {
+    try {
+        await betUtils.safeDeferUpdate(interaction);
+
+        // カスタムIDからパラメータを解析
+        const parts = interaction.customId.split('_');
+        // [0]=bet, [1]=formation, [2]=position, [3]=raceId, [4]=betType, [5]=amount
+        const position = parts[2]; // first, second, third, key, partner
+        const raceId = parts[3];
+        const betType = parts[4];
+        const amount = parseInt(parts[5], 10);
+
+        // 選択された馬番
+        const selectedHorses = interaction.values.map(v => parseInt(v, 10));
+
+        // レース情報を取得
+        const race = await getRaceById(raceId);
+        if (!race) {
+            return await betUtils.safeUpdateInteraction(interaction, {
+                content: `レース情報の取得に失敗しました。`,
+                components: []
+            });
+        }
+
+        // セッションを確認・更新
+        const session = betUtils.getSession(interaction.user.id, raceId);
+        if (!session) {
+            return await betUtils.safeUpdateInteraction(interaction, {
+                content: 'セッションが失効しました。最初からやり直してください。',
+                components: []
+            });
+        }
+
+        // セッションに選択を保存
+        let selections = session.selections || [];
+
+        if (position === 'first') {
+            // 1着馬選択の場合
+            selections[0] = selectedHorses;
+            betUtils.updateSession(interaction.user.id, raceId, {
+                selections,
+                formationStep: 'second'
+            });
+
+            // 2着馬選択メニューを表示
+            await showSecondPositionMenu(interaction, race, raceId, betType, amount, selectedHorses);
+        }
+        else if (position === 'second') {
+            // 2着馬選択の場合
+            selections[1] = selectedHorses;
+
+            if (betType === 'sanrentan') {
+                // 三連単の場合は3着も選択
+                betUtils.updateSession(interaction.user.id, raceId, {
+                    selections,
+                    formationStep: 'third'
+                });
+
+                // 3着馬選択メニューを表示
+                await showThirdPositionMenu(interaction, race, raceId, betType, amount, selections);
+            } else {
+                // 馬単の場合は確認画面へ
+                betUtils.updateSession(interaction.user.id, raceId, {
+                    selections,
+                    formationStep: 'confirm'
+                });
+
+                // 確認画面表示
+                await showFormationConfirmation(interaction, race, raceId, betType, amount, selections);
+            }
+        }
+        else if (position === 'third') {
+            // 3着馬選択の場合（三連単）
+            selections[2] = selectedHorses;
+            betUtils.updateSession(interaction.user.id, raceId, {
+                selections,
+                formationStep: 'confirm'
+            });
+
+            // 確認画面表示
+            await showFormationConfirmation(interaction, race, raceId, betType, amount, selections);
+        }
+        else if (position === 'key') {
+            // 軸馬選択の場合（馬連/三連複/ワイド）
+            selections[0] = selectedHorses;
+            betUtils.updateSession(interaction.user.id, raceId, {
+                selections,
+                formationStep: 'partner'
+            });
+
+            // 相手馬選択メニューを表示
+            await showPartnerHorseMenu(interaction, race, raceId, betType, amount, selectedHorses);
+        }
+        else if (position === 'partner') {
+            // 相手馬選択の場合
+            selections[1] = selectedHorses;
+            betUtils.updateSession(interaction.user.id, raceId, {
+                selections,
+                formationStep: 'confirm'
+            });
+
+            // 確認画面表示
+            await showFormationConfirmation(interaction, race, raceId, betType, amount, selections);
+        }
+    } catch (error) {
+        logger.error(`フォーメーション馬番選択中にエラー: ${error}`);
+        await betUtils.handleError(interaction, error);
+    }
+}
+
+// 馬券購入確認画面表示
+async function showFormationConfirmation(interaction, race, raceId, betType, amount, selections) {
+    // ユーザー情報を取得
+    const user = await getUser(interaction.user.id);
+
+    // 組み合わせ数計算
+    let combinationCount = 0;
+    if (betType === 'umatan' || betType === 'sanrentan') {
+        // 順序あり馬券
+        combinationCount = selections.reduce((acc, array) => acc * array.length, 1);
+    } else {
+        // 順序なし馬券
+        const keyHorses = selections[0].length;
+        const partnerHorses = selections[1].length;
+        const requiredHorses = betUtils.getRequiredSelections(betType);
+
+        if (requiredHorses === 2) {
+            // 馬連・ワイド
+            combinationCount = keyHorses * partnerHorses;
+        } else {
+            // 三連複 - 複雑な計算が必要
+            combinationCount = calculateFormationCombinations(keyHorses, partnerHorses, requiredHorses);
+        }
+    }
+
+    // 合計金額を計算
+    const totalCost = amount * combinationCount;
+
+    // 確認エンベッド
+    const confirmEmbed = betMenuBuilder.createFormationConfirmEmbed(
+        race,
+        betType,
+        selections,
+        amount,
+        totalCost,
+        user.points,
+        combinationCount
+    );
+
+    // 確認ボタン
+    const confirmButton = betMenuBuilder.createFormationConfirmButton(
+        raceId,
+        betType,
+        amount,
+        selections
+    );
+
+    await betUtils.safeUpdateInteraction(interaction, {
+        content: `フォーメーション馬券購入の確認`,
+        embeds: [confirmEmbed],
+        components: [confirmButton]
+    });
 }
 
 /**

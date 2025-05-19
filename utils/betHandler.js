@@ -169,16 +169,13 @@ export default class BetHandler {
         try {
             // カスタムIDからパラメータを解析
             const parts = interaction.customId.split('_');
-            // [0]=bet, [1]=select, [2]=method, [3]=raceId
             const raceId = parts[3];
             const method = interaction.values[0];
 
             // セッションを確認・更新
-            const sessionKey = `${interaction.user.id}_${raceId}`;
             const session = betUtils.getSession(interaction.user.id, raceId);
 
             if (!session || !session.betType) {
-                // 安全に応答
                 return await betUtils.safeUpdateInteraction(interaction, {
                     content: 'セッションが失効しました。最初からやり直してください。',
                     embeds: [],
@@ -203,7 +200,15 @@ export default class BetHandler {
                 });
             }
 
-            // 購入金額入力モーダル表示
+            // ★★★ 修正箇所 ★★★
+            // フォーメーション購入の場合は特別処理
+            if (method === 'formation') {
+                // deferUpdateせずに直接フォーメーションハンドラーにリダイレクト
+                const formationHandler = await import('./betHandlers/formationBetHandler.js');
+                return await formationHandler.startFormationBet(interaction, raceId, betType);
+            }
+
+            // 通常・BOX購入用のモーダル表示
             const modal = betModalBuilder.createAmountInputModal(
                 `bet_amount_${raceId}_${betType}_${method}`,
                 betType,
@@ -211,17 +216,14 @@ export default class BetHandler {
                 race
             );
 
-            // 修正: モーダル表示前にインタラクションの状態をチェック
-            // この部分が130~140行目付近と思われるので、特に注意して修正
+            // モーダル表示前にインタラクションの状態をチェック
             if (interaction.replied || interaction.deferred) {
-                // 既に応答済みの場合はエラーメッセージを表示
                 logger.warn('既に応答済みのインタラクションにモーダルを表示しようとしました');
                 return await betUtils.safeUpdateInteraction(interaction, {
                     content: 'セッションの状態にエラーが発生しました。もう一度最初から操作してください。',
                     components: []
                 });
             } else {
-                // 応答していない場合のみモーダルを表示
                 await interaction.showModal(modal);
             }
         } catch (error) {
@@ -266,17 +268,23 @@ export default class BetHandler {
                 await boxBetHandler.startBoxBet(interaction, raceId, betType, amount);
             }
             else if (method === 'formation') {
-                // フォーメーション購入 - 金額はセッションに保存
-                betUtils.updateSession(interaction.user.id, raceId, {
-                    amount: amount
-                });
-
-                await formationBetHandler.startFormationBet(interaction, raceId, betType);
+                // フォーメーション購入 - 金額を含めて渡す
+                await formationBetHandler.startFormationBet(interaction, raceId, betType, amount);
             }
         } catch (error) {
             logger.error(`金額入力処理中にエラー: ${error}`);
             await betUtils.handleError(interaction, error);
         }
+    }
+
+    // フォーメーション馬番選択の処理
+    static async handleFormationPositionSelection(interaction) {
+        await formationBetHandler.handlePositionSelection(interaction);
+    }
+
+    // フォーメーション購入確認の処理
+    static async handleFormationConfirmation(interaction) {
+        await formationBetHandler.handleFormationConfirmation(interaction);
     }
 
     /**
@@ -418,6 +426,70 @@ export default class BetHandler {
                     embeds: [],
                     components: [betTypeRow, backButton]
                 });
+            }
+            else if (customId.startsWith('bet_back_to_first_selection_')) {
+                const raceId = customId.split('_')[5];
+
+                // セッションを確認
+                const session = betUtils.getSession(interaction.user.id, raceId);
+                if (!session || !session.betType) {
+                    return await betUtils.safeUpdateInteraction(interaction, {
+                        content: 'セッションが失効しました。最初からやり直してください。',
+                        components: []
+                    });
+                }
+
+                // 1着選択画面に戻る
+                const race = await getRaceById(raceId);
+                if (race) {
+                    const formationHandler = await import('./betHandlers/formationBetHandler.js');
+                    await formationHandler.showFirstPositionMenu(interaction, race, raceId, session.betType, session.amount);
+                }
+            }
+            else if (customId.startsWith('bet_back_to_second_selection_')) {
+                const raceId = customId.split('_')[5];
+
+                // セッションを確認
+                const session = betUtils.getSession(interaction.user.id, raceId);
+                if (!session || !session.betType || !session.selections) {
+                    return await betUtils.safeUpdateInteraction(interaction, {
+                        content: 'セッションが失効しました。最初からやり直してください。',
+                        components: []
+                    });
+                }
+
+                // 2着選択画面に戻る
+                const race = await getRaceById(raceId);
+                if (race) {
+                    const formationHandler = await import('./betHandlers/formationBetHandler.js');
+                    await formationHandler.showSecondPositionMenu(
+                        interaction,
+                        race,
+                        raceId,
+                        session.betType,
+                        session.amount,
+                        session.selections[0]
+                    );
+                }
+            }
+            else if (customId.startsWith('bet_back_to_key_selection_')) {
+                const raceId = customId.split('_')[5];
+
+                // セッションを確認
+                const session = betUtils.getSession(interaction.user.id, raceId);
+                if (!session || !session.betType) {
+                    return await betUtils.safeUpdateInteraction(interaction, {
+                        content: 'セッションが失効しました。最初からやり直してください。',
+                        components: []
+                    });
+                }
+
+                // 軸馬選択画面に戻る
+                const race = await getRaceById(raceId);
+                if (race) {
+                    const formationHandler = await import('./betHandlers/formationBetHandler.js');
+                    await formationHandler.showKeyHorseMenu(interaction, race, raceId, session.betType, session.amount);
+                }
             }
             // 購入方法選択に戻る
             else if (customId.startsWith('bet_back_to_method_')) {
