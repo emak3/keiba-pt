@@ -249,14 +249,7 @@ export function createConfirmEmbed(race, betType, method, selectedHorses, amount
             `${horseNumber}番: ${horse.horseName} (騎手: ${horse.jockey})` :
             `${horseNumber}番`;
     });
-
-    // 組み合わせ数の表示
-    let combinationInfo = '';
-    if (method === 'box' || method === 'formation') {
-        const combinationCount = calculateCombinations(selectedHorses.length, betType, method);
-        combinationInfo = `\n組み合わせ数: ${combinationCount}通り`;
-    }
-
+    
     return new EmbedBuilder()
         .setTitle(`🏇 馬券購入確認 - ${race.venue} ${race.number}R ${race.name}`)
         .setDescription(`**${betTypeNames[betType]}**（${methodNames[method]}）の購入を確定しますか？`)
