@@ -45,7 +45,7 @@ export async function startFormationBet(interaction, raceId, betType) {
             race
         );
         
-        await interaction.showModal(modal);
+        await betUtils.safeShowModal(interaction, modal);
     } catch (error) {
         await betUtils.handleError(interaction, error);
     }

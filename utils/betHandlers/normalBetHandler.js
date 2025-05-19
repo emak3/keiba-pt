@@ -64,7 +64,7 @@ export async function startNormalBet(interaction, raceId, betType, amount) {
                 race
             );
             
-            await interaction.showModal(modal);
+            await betUtils.safeShowModal(interaction, modal);
             return;
         }
         

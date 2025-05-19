@@ -1,14 +1,30 @@
-// utils/betHandler.js
-// 馬券購入処理のメインハンドラークラス（リファクタリング版）
+// utils/betHandler.js の修正版 - インタラクションエラー修正
+// 特に handleMethodSelection メソッドの修正に焦点
 
+import {
+  MessageFlags,
+  SlashCommandBuilder,
+  EmbedBuilder,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
+} from 'discord.js';
 import { getRaceById } from '../services/database/raceService.js';
-import { getUser } from '../services/database/userService.js';
-import logger from './logger.js';
+import { getUser, saveUser } from '../services/database/userService.js';
+import { placeBet } from '../services/database/betService.js';
+import logger from '../utils/logger.js';
+
+// 修正: 安全なインタラクション処理のためのユーティリティをインポート
+import SafeInteraction from './safeInteraction.js';
+import * as betUtils from './betUI/betUtils.js';
 
 // UI関連モジュールをインポート
 import * as betMenuBuilder from './betUI/betMenuBuilder.js';
 import * as betModalBuilder from './betUI/betModalBuilder.js';
-import * as betUtils from './betUI/betUtils.js';
 
 // 購入方法別ハンドラーをインポート
 import * as normalBetHandler from './betHandlers/normalBetHandler.js';
@@ -25,9 +41,8 @@ export default class BetHandler {
      */
     static async handleBetTypeSelection(interaction) {
         try {
-            await interaction.deferUpdate().catch(err => {
-                logger.warn(`deferUpdate エラー (無視して続行): ${err}`);
-            });
+            // 安全に遅延応答
+            await betUtils.safeDeferUpdate(interaction);
 
             // カスタムIDからレースIDを抽出
             const parts = interaction.customId.split('_');
@@ -38,7 +53,7 @@ export default class BetHandler {
             const race = await getRaceById(raceId);
 
             if (!race) {
-                return await interaction.editReply({
+                return await betUtils.safeUpdateInteraction(interaction, {
                     content: `レースID ${raceId} の情報が見つかりませんでした。`,
                     embeds: [],
                     components: []
@@ -48,7 +63,7 @@ export default class BetHandler {
             // ユーザー情報を取得
             const user = await getUser(interaction.user.id);
             if (!user) {
-                return await interaction.editReply({
+                return await betUtils.safeUpdateInteraction(interaction, {
                     content: 'ユーザー情報の取得に失敗しました。',
                     embeds: [],
                     components: []
@@ -69,7 +84,7 @@ export default class BetHandler {
                 'レース詳細に戻る'
             );
 
-            await interaction.editReply({
+            await betUtils.safeUpdateInteraction(interaction, {
                 content: `**${betUtils.betTypeNames[betType]}**の購入方法を選択してください`,
                 embeds: [],
                 components: [methodRow, backButton]
@@ -86,10 +101,6 @@ export default class BetHandler {
      */
     static async handleMethodSelection(interaction) {
         try {
-            await interaction.deferUpdate().catch(err => {
-                logger.warn(`deferUpdate エラー (無視して続行): ${err}`);
-            });
-
             // カスタムIDからパラメータを解析
             const parts = interaction.customId.split('_');
             // [0]=bet, [1]=select, [2]=method, [3]=raceId
@@ -101,7 +112,8 @@ export default class BetHandler {
             const session = betUtils.getSession(interaction.user.id, raceId);
 
             if (!session || !session.betType) {
-                return await interaction.editReply({
+                // 安全に応答
+                return await betUtils.safeUpdateInteraction(interaction, {
                     content: 'セッションが失効しました。最初からやり直してください。',
                     embeds: [],
                     components: []
@@ -118,7 +130,7 @@ export default class BetHandler {
             // レース情報を取得
             const race = await getRaceById(raceId);
             if (!race) {
-                return await interaction.editReply({
+                return await betUtils.safeUpdateInteraction(interaction, {
                     content: `レースID ${raceId} の情報が見つかりませんでした。`,
                     embeds: [],
                     components: []
@@ -133,7 +145,19 @@ export default class BetHandler {
                 race
             );
             
-            await interaction.showModal(modal);
+            // 修正: モーダル表示前にインタラクションの状態をチェック
+            // この部分が130~140行目付近と思われるので、特に注意して修正
+            if (interaction.replied || interaction.deferred) {
+                // 既に応答済みの場合はエラーメッセージを表示
+                logger.warn('既に応答済みのインタラクションにモーダルを表示しようとしました');
+                return await betUtils.safeUpdateInteraction(interaction, {
+                    content: 'セッションの状態にエラーが発生しました。もう一度最初から操作してください。',
+                    components: []
+                });
+            } else {
+                // 応答していない場合のみモーダルを表示
+                await interaction.showModal(modal);
+            }
         } catch (error) {
             logger.error(`購入方法選択処理中にエラー: ${error}`);
             await betUtils.handleError(interaction, error);
@@ -146,9 +170,7 @@ export default class BetHandler {
      */
     static async handleAmountSubmit(interaction) {
         try {
-            await interaction.deferUpdate().catch(err => {
-                logger.warn(`deferUpdate エラー (無視して続行): ${err}`);
-            });
+            await betUtils.safeDeferUpdate(interaction);
 
             // カスタムIDからパラメータを解析
             const parts = interaction.customId.split('_');
@@ -162,7 +184,7 @@ export default class BetHandler {
             const amount = betUtils.validateAmount(amountInput);
             
             if (!amount) {
-                return await interaction.editReply({
+                return await betUtils.safeUpdateInteraction(interaction, {
                     content: '購入金額は100pt単位で、100pt以上10,000pt以下で指定してください。',
                     components: []
                 });
@@ -197,9 +219,7 @@ export default class BetHandler {
      */
     static async handleHorseSelection(interaction) {
         try {
-            await interaction.deferUpdate().catch(err => {
-                logger.warn(`deferUpdate エラー (無視して続行): ${err}`);
-            });
+            await betUtils.safeDeferUpdate(interaction);
 
             // カスタムIDからパラメータを解析
             const parts = interaction.customId.split('_');
@@ -237,9 +257,7 @@ export default class BetHandler {
                 return await this.navigateToRaceDetail(interaction, raceId);
             }
 
-            await interaction.deferUpdate().catch(err => {
-                logger.warn(`deferUpdate エラー (無視して続行): ${err}`);
-            });
+            await betUtils.safeDeferUpdate(interaction);
 
             // customId から情報を抽出
             const parts = interaction.customId.split('_');
@@ -297,9 +315,7 @@ export default class BetHandler {
      */
     static async handleBackButton(interaction) {
         try {
-            await interaction.deferUpdate().catch(err => {
-                logger.warn(`deferUpdate エラー (無視して続行): ${err}`);
-            });
+            await betUtils.safeDeferUpdate(interaction);
 
             const customId = interaction.customId;
 
@@ -315,7 +331,7 @@ export default class BetHandler {
                 // レース情報を取得
                 const race = await getRaceById(raceId);
                 if (!race) {
-                    return await interaction.editReply({
+                    return await betUtils.safeUpdateInteraction(interaction, {
                         content: `レースID ${raceId} の情報が見つかりませんでした。`,
                         embeds: [],
                         components: []
@@ -331,7 +347,7 @@ export default class BetHandler {
                     'レース詳細に戻る'
                 );
 
-                await interaction.editReply({
+                await betUtils.safeUpdateInteraction(interaction, {
                     content: 'レース詳細と馬券購入画面です。馬券を購入するには、まず馬券の種類を選択してください。',
                     embeds: [],
                     components: [betTypeRow, backButton]
@@ -345,7 +361,7 @@ export default class BetHandler {
                 const session = betUtils.getSession(interaction.user.id, raceId);
 
                 if (!session || !session.betType) {
-                    return await interaction.editReply({
+                    return await betUtils.safeUpdateInteraction(interaction, {
                         content: 'セッションが失効しました。最初からやり直してください。',
                         embeds: [],
                         components: []
@@ -357,7 +373,7 @@ export default class BetHandler {
                 // レース情報を取得
                 const race = await getRaceById(raceId);
                 if (!race) {
-                    return await interaction.editReply({
+                    return await betUtils.safeUpdateInteraction(interaction, {
                         content: `レースID ${raceId} の情報が見つかりませんでした。`,
                         embeds: [],
                         components: []
@@ -373,14 +389,14 @@ export default class BetHandler {
                     '馬券種類選択に戻る'
                 );
 
-                await interaction.editReply({
+                await betUtils.safeUpdateInteraction(interaction, {
                     content: `**${betUtils.betTypeNames[betType]}**の購入方法を選択してください`,
                     embeds: [],
                     components: [methodRow, backButton]
                 });
             }
             else {
-                await interaction.editReply({
+                await betUtils.safeUpdateInteraction(interaction, {
                     content: '戻る操作が認識できませんでした。',
                     components: []
                 });
@@ -398,14 +414,12 @@ export default class BetHandler {
      */
     static async handleMypageButton(interaction, client) {
         try {
-            await interaction.deferUpdate().catch(err => {
-                logger.warn(`deferUpdate エラー (無視して続行): ${err}`);
-            });
+            await betUtils.safeDeferUpdate(interaction);
 
             // ユーザー情報を取得
             const user = await getUser(interaction.user.id);
             if (!user) {
-                return await interaction.editReply({
+                return await betUtils.safeUpdateInteraction(interaction, {
                     content: 'ユーザー情報の取得に失敗しました。',
                     embeds: [],
                     components: []
@@ -420,7 +434,7 @@ export default class BetHandler {
                 await mypageModule.displayMypage(interaction, user);
             } catch (importError) {
                 logger.error(`mypageモジュールのインポートエラー: ${importError}`);
-                await interaction.editReply({
+                await betUtils.safeUpdateInteraction(interaction, {
                     content: 'マイページの表示に失敗しました。',
                     components: []
                 });
@@ -442,7 +456,7 @@ export default class BetHandler {
             // レース情報を取得
             const race = await getRaceById(raceId);
             if (!race) {
-                return await interaction.editReply({
+                return await betUtils.safeUpdateInteraction(interaction, {
                     content: `レースID ${raceId} の情報が見つかりませんでした。`,
                     embeds: [],
                     components: []
@@ -461,7 +475,7 @@ export default class BetHandler {
                     // 関数がない場合は簡易表示
                     const betTypeRow = betMenuBuilder.createBetTypeMenu(raceId);
                     
-                    await interaction.editReply({
+                    await betUtils.safeUpdateInteraction(interaction, {
                         content: `${race.venue} ${race.number}R ${race.name} の詳細画面です。馬券を購入するには、馬券の種類を選択してください。`,
                         components: [betTypeRow]
                     });
@@ -472,7 +486,7 @@ export default class BetHandler {
                 // インポートエラーの場合は簡易表示
                 const betTypeRow = betMenuBuilder.createBetTypeMenu(raceId);
                 
-                await interaction.editReply({
+                await betUtils.safeUpdateInteraction(interaction, {
                     content: `${race.venue} ${race.number}R ${race.name} の詳細画面です。馬券を購入するには、馬券の種類を選択してください。`,
                     components: [betTypeRow]
                 });

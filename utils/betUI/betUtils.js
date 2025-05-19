@@ -1,8 +1,9 @@
-// utils/betUI/betUtils.js
-// 馬券購入関連の共通ユーティリティ
+// utils/betUI/betUtils.js の修正版
+// 馬券購入関連の共通ユーティリティ（エラー処理強化版）
 
-import logger from '../../utils/logger.js';
 import { MessageFlags } from 'discord.js';
+import logger from '../../utils/logger.js';
+import SafeInteraction from '../safeInteraction.js';
 
 /**
  * 馬券タイプの名称マッピング
@@ -44,22 +45,22 @@ export function initBetSessions() {
  */
 export function getSession(userId, raceId) {
     initBetSessions();
-    
+
     const sessionKey = `${userId}_${raceId}`;
     const session = global.betSessions[sessionKey];
-    
+
     // セッションの有効期限チェック (1時間)
     if (session && session.timestamp) {
         const now = Date.now();
         const oneHour = 60 * 60 * 1000;
-        
+
         if (now - session.timestamp > oneHour) {
             // 期限切れのセッションを削除
             delete global.betSessions[sessionKey];
             return null;
         }
     }
-    
+
     return session;
 }
 
@@ -72,16 +73,16 @@ export function getSession(userId, raceId) {
  */
 export function updateSession(userId, raceId, data) {
     initBetSessions();
-    
+
     const sessionKey = `${userId}_${raceId}`;
     const existingSession = global.betSessions[sessionKey] || {};
-    
+
     const updatedSession = {
         ...existingSession,
         ...data,
         timestamp: Date.now() // タイムスタンプを更新
     };
-    
+
     global.betSessions[sessionKey] = updatedSession;
     return updatedSession;
 }
@@ -93,7 +94,7 @@ export function updateSession(userId, raceId, data) {
  */
 export function clearSession(userId, raceId) {
     initBetSessions();
-    
+
     const sessionKey = `${userId}_${raceId}`;
     delete global.betSessions[sessionKey];
 }
@@ -108,22 +109,22 @@ export function validateAmount(amount) {
     if (typeof amount === 'string') {
         amount = parseInt(amount.replace(/[^\d]/g, ''), 10);
     }
-    
+
     // 数値でない場合はnullを返す
     if (isNaN(amount)) {
         return null;
     }
-    
+
     // 100pt未満または10,000ptより大きい場合は無効
     if (amount < 100 || amount > 10000) {
         return null;
     }
-    
+
     // 100pt単位でない場合は無効
     if (amount % 100 !== 0) {
         return null;
     }
-    
+
     return amount;
 }
 
@@ -140,12 +141,12 @@ export function calculateTotalCost(betType, method, selections, baseAmount) {
         // 通常購入は基本金額のまま
         return baseAmount;
     }
-    
+
     let combinationCount = 1;
-    
+
     if (method === 'box') {
         // BOX購入の組み合わせ数を計算
-        
+
         // 単勝・複勝のBOX対応（各馬ごとに1点）
         if (betType === 'tansho' || betType === 'fukusho') {
             combinationCount = selections.length;
@@ -154,7 +155,7 @@ export function calculateTotalCost(betType, method, selections, baseAmount) {
         else {
             const n = selections.length; // 選択馬数
             const r = getRequiredSelections(betType); // 必要な選択数
-            
+
             // 組み合わせ数の計算 (nCr)
             combinationCount = calculateCombination(n, r);
         }
@@ -169,12 +170,12 @@ export function calculateTotalCost(betType, method, selections, baseAmount) {
             // 他の馬券タイプ（馬連・三連複など）
             const n = selections.length; // 選択馬数
             const r = getRequiredSelections(betType); // 必要な選択数
-            
+
             // 組み合わせ数の計算 (nCr)
             combinationCount = calculateCombination(n, r);
         }
     }
-    
+
     return baseAmount * combinationCount;
 }
 
@@ -187,19 +188,19 @@ export function calculateTotalCost(betType, method, selections, baseAmount) {
 export function calculateCombination(n, r) {
     if (r > n) return 0;
     if (r === 0 || r === n) return 1;
-    
+
     // 分子: n * (n-1) * ... * (n-r+1)
     let numerator = 1;
     for (let i = 0; i < r; i++) {
         numerator *= (n - i);
     }
-    
+
     // 分母: r!
     let denominator = 1;
     for (let i = 1; i <= r; i++) {
         denominator *= i;
     }
-    
+
     return Math.round(numerator / denominator);
 }
 
@@ -219,58 +220,63 @@ export function getRequiredSelections(betType) {
         sanrenpuku: 3, // 三連複: 3頭
         sanrentan: 3   // 三連単: 3頭
     };
-    
+
     return requirements[betType] || 0;
 }
 
 /**
- * エラーハンドリング共通処理
+ * [改善版] エラーハンドリング共通処理
+ * インタラクションの状態を考慮して適切なエラー応答を行う
  * @param {MessageComponentInteraction} interaction - インタラクション
  * @param {Error} error - エラーオブジェクト
  */
 export async function handleError(interaction, error) {
-    try {
-        const errorMessage = `操作中にエラーが発生しました: ${error.message}`;
-        logger.error(`馬券処理エラー: ${error.stack || error}`);
+    // SafeInteractionクラスのエラーハンドリング機能を使用
+    await SafeInteraction.handleError(interaction, error);
+}
 
-        if (interaction.deferred) {
-            try {
-                await interaction.editReply({
-                    content: errorMessage,
-                    components: []
-                });
-            } catch (editError) {
-                logger.error(`editReply エラー: ${editError}`);
-                await interaction.followUp({
-                    content: errorMessage,
-                    flags: MessageFlags.Ephemeral
-                }).catch(() => {});
-            }
-        } else if (interaction.replied) {
-            await interaction.followUp({
-                content: errorMessage,
-                flags: MessageFlags.Ephemeral
-            }).catch(() => {});
-        } else {
-            try {
-                await interaction.reply({
-                    content: errorMessage,
-                    flags: MessageFlags.Ephemeral
-                });
-            } catch (replyError) {
-                logger.error(`reply エラー: ${replyError}`);
-                try {
-                    await interaction.deferUpdate();
-                    await interaction.editReply({
-                        content: errorMessage,
-                        components: []
-                    });
-                } catch (finalError) {
-                    logger.error(`最終エラー処理も失敗: ${finalError}`);
-                }
-            }
-        }
-    } catch (handlerError) {
-        logger.error(`エラー処理中に更にエラー発生: ${handlerError}`);
+/**
+ * [新機能] インタラクションを安全に更新する
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ * @param {Object} options - 更新オプション
+ */
+export async function safeUpdateInteraction(interaction, options) {
+    await SafeInteraction.safeUpdate(interaction, options);
+}
+
+/**
+ * [新機能] インタラクションを安全に遅延応答する
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ */
+export async function safeDeferUpdate(interaction) {
+    if (interaction.replied || interaction.deferred) {
+        // 既に応答済みの場合は何もしない
+        logger.debug('インタラクションは既に応答済みです。deferUpdateはスキップします。');
+        return;
     }
+
+    try {
+        await interaction.deferUpdate().catch(err => {
+            logger.warn(`deferUpdate エラー (リカバリを試みます): ${err}`);
+            // deferUpdateが失敗した場合はdeferReplyを試す
+            return interaction.deferReply({ ephemeral: true }).catch(deferReplyErr => {
+                logger.error(`deferReply もエラー: ${deferReplyErr}`);
+                // 両方失敗した場合は例外をスロー
+                throw new Error('インタラクション応答に失敗しました');
+            });
+        });
+    } catch (error) {
+        // エラーハンドリング
+        logger.error(`safeDeferUpdate エラー: ${error}`);
+        throw error;
+    }
+}
+
+/**
+ * [新機能] モーダルを安全に表示する
+ * @param {MessageComponentInteraction} interaction - インタラクション
+ * @param {ModalBuilder} modal - 表示するモーダル
+ */
+export async function safeShowModal(interaction, modal) {
+    await SafeInteraction.safeShowModal(interaction, modal);
 }
