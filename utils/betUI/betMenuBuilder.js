@@ -60,20 +60,22 @@ export function createBetTypeMenu(raceId) {
  */
 export function createMethodMenu(raceId, betType) {
     const options = [];
-    
-    // 全馬券タイプでBOX対応（単勝、複勝も含む）
+
+    // 全馬券タイプで通常購入
     options.push({
         label: '通常',
         value: 'normal',
         description: `${betTypeNames[betType]}: 選択した馬(枠)を購入`,
         emoji: '🎫'
     });
-    
-    // 単勝・複勝も含め、すべての馬券でBOX購入を可能に
+
+    // 全馬券タイプでBOX購入対応
     options.push({
         label: 'ボックス',
         value: 'box',
-        description: `${betTypeNames[betType]}: 選択した馬(枠)の組み合わせを購入`,
+        description: betType === 'tansho' || betType === 'fukusho' ?
+            `${betTypeNames[betType]}: 複数の馬に均等に購入` :
+            `${betTypeNames[betType]}: 選択した馬の全組み合わせを購入`,
         emoji: '📦'
     });
 
@@ -84,7 +86,7 @@ export function createMethodMenu(raceId, betType) {
         description: `${betTypeNames[betType]}: 1着~3着を軸馬と相手馬で購入`,
         emoji: '📊'
     });
-    
+
     return new ActionRowBuilder()
         .addComponents(
             new StringSelectMenuBuilder()
@@ -107,7 +109,7 @@ export function createHorseSelectionMenu(raceId, betType, method, amount, horses
     // 馬券タイプと購入方法に応じた最大選択数を取得
     const maxSelections = getMaxSelectionsForBet(betType, method);
     const minSelections = getMinSelectionsForBet(betType);
-    
+
     return new ActionRowBuilder()
         .addComponents(
             new StringSelectMenuBuilder()
@@ -304,17 +306,17 @@ export function getMinSelectionsForBet(betType) {
 export function calculateCombinations(selectedCount, betType, method) {
     // 必要な馬の数
     const requiredHorses = getMinSelectionsForBet(betType);
-    
+
     if (method === 'box') {
         // 単勝・複勝のBOX対応（各馬ごとに1点）
         if (betType === 'tansho' || betType === 'fukusho') {
             return selectedCount;
         }
-        
+
         // 組み合わせ数の計算 (nCr)
         return calculateCombination(selectedCount, requiredHorses);
     }
-    
+
     return 1; // 通常購入は1通り
 }
 
@@ -327,19 +329,19 @@ export function calculateCombinations(selectedCount, betType, method) {
 function calculateCombination(n, r) {
     if (r > n) return 0;
     if (r === 0 || r === n) return 1;
-    
+
     // 分子: n * (n-1) * ... * (n-r+1)
     let numerator = 1;
     for (let i = 0; i < r; i++) {
         numerator *= (n - i);
     }
-    
+
     // 分母: r!
     let denominator = 1;
     for (let i = 1; i <= r; i++) {
         denominator *= i;
     }
-    
+
     return Math.round(numerator / denominator);
 }
 

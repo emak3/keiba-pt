@@ -138,25 +138,26 @@ export function validateAmount(amount) {
  */
 export function calculateTotalCost(betType, method, selections, baseAmount) {
     if (method === 'normal') {
-        // 通常購入は基本金額のまま
         return baseAmount;
     }
 
     let combinationCount = 1;
 
     if (method === 'box') {
-        // BOX購入の組み合わせ数を計算
-
-        // 単勝・複勝のBOX対応（各馬ごとに1点）
+        // 単勝・複勝は単純に頭数分
         if (betType === 'tansho' || betType === 'fukusho') {
             combinationCount = selections.length;
         }
-        // 通常のBOX購入
+        // 順序あり馬券は順列計算
+        else if (betType === 'umatan' || betType === 'sanrentan') {
+            const n = selections.length;
+            const r = getRequiredSelections(betType);
+            combinationCount = calculatePermutation(n, r);
+        }
+        // 順序なし馬券は組み合わせ計算
         else {
-            const n = selections.length; // 選択馬数
-            const r = getRequiredSelections(betType); // 必要な選択数
-
-            // 組み合わせ数の計算 (nCr)
+            const n = selections.length;
+            const r = getRequiredSelections(betType);
             combinationCount = calculateCombination(n, r);
         }
     }
@@ -202,6 +203,38 @@ export function calculateCombination(n, r) {
     }
 
     return Math.round(numerator / denominator);
+}
+export function calculatePermutation(n, r) {
+    if (r > n) return 0;
+
+    // 順列の計算: nPr = n! / (n-r)!
+    let result = 1;
+    for (let i = 0; i < r; i++) {
+        result *= (n - i);
+    }
+
+    return result;
+}
+
+export function calculateCombinations(selectedCount, betType, method) {
+    const requiredHorses = getRequiredSelections(betType);
+
+    if (method === 'box') {
+        // 単勝・複勝のBOX対応（各馬ごとに1点）
+        if (betType === 'tansho' || betType === 'fukusho') {
+            return selectedCount;
+        }
+
+        // 順序あり馬券（馬単・三連単）は順列計算
+        if (betType === 'umatan' || betType === 'sanrentan') {
+            return calculatePermutation(selectedCount, requiredHorses);
+        }
+
+        // 順序なし馬券（馬連・三連複など）は組み合わせ計算
+        return calculateCombination(selectedCount, requiredHorses);
+    }
+
+    return 1; // 通常購入は1通り
 }
 
 /**
