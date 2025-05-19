@@ -106,6 +106,9 @@ export function createMethodMenu(raceId, betType) {
  * @returns {ActionRowBuilder} 構築されたメニュー
  */
 export function createHorseSelectionMenu(raceId, betType, method, amount, horses) {
+    if (betType === 'wakuren') {
+        return createFrameSelectionMenu(raceId, betType, method, amount, horses);
+    }
     // 馬券タイプと購入方法に応じた最大選択数を取得
     const maxSelections = getMaxSelectionsForBet(betType, method);
     const minSelections = getMinSelectionsForBet(betType);
@@ -120,7 +123,74 @@ export function createHorseSelectionMenu(raceId, betType, method, amount, horses
                 .addOptions(createHorseOptions(horses || []))
         );
 }
+/**
+ * 枠番選択メニューを構築（枠連用）
+ */
+function createFrameSelectionMenu(raceId, betType, method, amount, horses) {
+    const maxSelections = getMaxSelectionsForBet(betType, method);
+    const minSelections = getMinSelectionsForBet(betType);
 
+    return new ActionRowBuilder()
+        .addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId(`bet_select_frames_${raceId}_${betType}_${method}_${amount}`)
+                .setPlaceholder('枠番を選択してください')
+                .setMinValues(minSelections)
+                .setMaxValues(maxSelections)
+                .addOptions(createFrameOptions(horses || []))
+        );
+}
+
+/**
+ * 枠リストから選択肢を作成
+ */
+function createFrameOptions(horses) {
+    // 使用されている枠番を集める
+    const frameSet = new Set();
+
+    if (horses && horses.length > 0) {
+        horses.forEach(horse => {
+            if (horse.frameNumber && !horse.isCanceled) {
+                frameSet.add(horse.frameNumber);
+            }
+        });
+    }
+
+    // 枠番がない場合は1〜8枠を表示
+    if (frameSet.size === 0) {
+        for (let i = 1; i <= 8; i++) {
+            frameSet.add(i);
+        }
+    }
+
+    // 枠番順にソートしてオプションを作成
+    const options = [];
+    [...frameSet].sort((a, b) => a - b).forEach(frameNumber => {
+        // その枠に含まれる馬の情報を取得
+        const horsesInFrame = horses.filter(h =>
+            h.frameNumber === frameNumber && !h.isCanceled
+        );
+
+        let description = `${frameNumber}枠`;
+        if (horsesInFrame.length > 0) {
+            const horseInfo = horsesInFrame.map(h =>
+                `${h.horseNumber}番:${h.horseName.substring(0, 5)}`
+            ).join(', ');
+
+            description = horseInfo.length > 100
+                ? horseInfo.substring(0, 97) + '...'
+                : horseInfo;
+        }
+
+        options.push({
+            label: `${frameNumber}枠`,
+            description: description,
+            value: `${frameNumber}`
+        });
+    });
+
+    return options;
+}
 /**
  * 戻るボタンを構築
  * @param {string} customId - ボタンのカスタムID

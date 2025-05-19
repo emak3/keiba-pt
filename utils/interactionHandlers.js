@@ -93,6 +93,9 @@ export async function setupInteractionHandlers(client) {
         // races.js で処理されるのでスキップ
         return;
       }
+      else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('bet_select_frames_')) {
+        await BetHandler.handleFrameSelection(interaction);
+      }
       else if (interaction.isButton() && (
         interaction.customId.startsWith('races_prev_') ||
         interaction.customId.startsWith('races_next_') ||

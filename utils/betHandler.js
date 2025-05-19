@@ -2,16 +2,16 @@
 // 特に handleMethodSelection メソッドの修正に焦点
 
 import {
-  MessageFlags,
-  SlashCommandBuilder,
-  EmbedBuilder,
-  ActionRowBuilder,
-  StringSelectMenuBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle
+    MessageFlags,
+    SlashCommandBuilder,
+    EmbedBuilder,
+    ActionRowBuilder,
+    StringSelectMenuBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
 } from 'discord.js';
 import { getRaceById } from '../services/database/raceService.js';
 import { getUser, saveUser } from '../services/database/userService.js';
@@ -96,6 +96,72 @@ export default class BetHandler {
     }
 
     /**
+     * 枠番選択を処理（枠連用）
+     */
+    static async handleFrameSelection(interaction) {
+        try {
+            await betUtils.safeDeferUpdate(interaction);
+
+            const parts = interaction.customId.split('_');
+            const raceId = parts[3];
+            const betType = parts[4];
+            const method = parts[5];
+            const amount = parseInt(parts[6], 10);
+
+            // 選択された枠番
+            const selectedFrames = interaction.values.map(value => parseInt(value, 10));
+
+            // レース情報とユーザー情報を取得
+            const race = await getRaceById(raceId);
+            const user = await getUser(interaction.user.id);
+
+            if (!race || !user) {
+                return await betUtils.safeUpdateInteraction(interaction, {
+                    content: '情報の取得に失敗しました。',
+                    components: []
+                });
+            }
+
+            // 購入方法に応じた処理へ振り分け
+            if (method === 'normal') {
+                // 通常購入と同様の処理を枠番用に
+                const confirmEmbed = betMenuBuilder.createConfirmEmbed(
+                    race,
+                    betType,
+                    method,
+                    selectedFrames,  // ここは枠番の配列
+                    amount,
+                    user.points,
+                    amount
+                );
+
+                const confirmButton = betMenuBuilder.createConfirmButton(
+                    raceId,
+                    betType,
+                    method,
+                    amount,
+                    selectedFrames  // ここは枠番の配列
+                );
+
+                await betUtils.safeUpdateInteraction(interaction, {
+                    embeds: [confirmEmbed],
+                    components: [confirmButton]
+                });
+            }
+            else if (method === 'box') {
+                // BOX購入処理（枠連用）
+                // ...通常の馬券と同様の処理を枠番向けに実装...
+            }
+            else if (method === 'formation') {
+                // フォーメーション処理（枠連用）
+                // ...通常の馬券と同様の処理を枠番向けに実装...
+            }
+        } catch (error) {
+            await betUtils.handleError(interaction, error);
+        }
+    }
+
+    /**
      * 馬券購入方法選択を処理
      * @param {StringSelectMenuInteraction} interaction - インタラクション
      */
@@ -144,7 +210,7 @@ export default class BetHandler {
                 method,
                 race
             );
-            
+
             // 修正: モーダル表示前にインタラクションの状態をチェック
             // この部分が130~140行目付近と思われるので、特に注意して修正
             if (interaction.replied || interaction.deferred) {
@@ -178,18 +244,18 @@ export default class BetHandler {
             const raceId = parts[2];
             const betType = parts[3];
             const method = parts[4];
-            
+
             // 入力された金額を取得
             const amountInput = interaction.fields.getTextInputValue('amount');
             const amount = betUtils.validateAmount(amountInput);
-            
+
             if (!amount) {
                 return await betUtils.safeUpdateInteraction(interaction, {
                     content: '購入金額は100pt単位で、100pt以上10,000pt以下で指定してください。',
                     components: []
                 });
             }
-            
+
             // 購入方法に応じた処理
             if (method === 'normal') {
                 // 通常購入
@@ -204,7 +270,7 @@ export default class BetHandler {
                 betUtils.updateSession(interaction.user.id, raceId, {
                     amount: amount
                 });
-                
+
                 await formationBetHandler.startFormationBet(interaction, raceId, betType);
             }
         } catch (error) {
@@ -282,7 +348,7 @@ export default class BetHandler {
             await betUtils.handleError(interaction, error);
         }
     }
-    
+
     /**
      * 馬単・三連単用の順序指定モーダル送信を処理
      * @param {ModalSubmitInteraction} interaction - モーダル送信インタラクション
@@ -467,14 +533,14 @@ export default class BetHandler {
             try {
                 // 動的インポート
                 const racesModule = await import('../commands/races.js');
-                
+
                 // displayRaceDetail関数があれば呼び出す
                 if (racesModule.default && typeof racesModule.default.displayRaceDetail === 'function') {
                     await racesModule.default.displayRaceDetail(interaction, raceId, showBetMenu);
                 } else {
                     // 関数がない場合は簡易表示
                     const betTypeRow = betMenuBuilder.createBetTypeMenu(raceId);
-                    
+
                     await betUtils.safeUpdateInteraction(interaction, {
                         content: `${race.venue} ${race.number}R ${race.name} の詳細画面です。馬券を購入するには、馬券の種類を選択してください。`,
                         components: [betTypeRow]
@@ -482,10 +548,10 @@ export default class BetHandler {
                 }
             } catch (importError) {
                 logger.error(`races.jsモジュールのインポートエラー: ${importError}`);
-                
+
                 // インポートエラーの場合は簡易表示
                 const betTypeRow = betMenuBuilder.createBetTypeMenu(raceId);
-                
+
                 await betUtils.safeUpdateInteraction(interaction, {
                     content: `${race.venue} ${race.number}R ${race.name} の詳細画面です。馬券を購入するには、馬券の種類を選択してください。`,
                     components: [betTypeRow]
