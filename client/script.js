@@ -1,13 +1,6 @@
 // Firebaseの設定
 // ここに実際のFirebase設定を入力してください
-const firebaseConfig = {
-    apiKey: "AIzaSyAPmLJGgk7MbNpCrvqfYPYYMUEwB4FL21s",
-    authDomain: "keiba-pt.firebaseapp.com",
-    projectId: "keiba-pt",
-    storageBucket: "keiba-pt.firebasestorage.app",
-    messagingSenderId: "109594011528",
-    appId: "1:109594011528:web:b480c480cbac7082fa7c3d"
-};
+
 
 // Firebaseの初期化
 firebase.initializeApp(firebaseConfig);
