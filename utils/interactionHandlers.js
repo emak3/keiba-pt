@@ -67,9 +67,21 @@ export async function setupInteractionHandlers(client) {
         await handleMypageMoreHistory(interaction);
       }
 
+      // ※※※ 以下を追加（金額入力モーダルの処理）※※※
+      // 金額入力モーダルの送信処理
+      else if (interaction.isModalSubmit() && interaction.customId.startsWith('bet_amount_')) {
+        await BetHandler.handleAmountSubmit(interaction);
+      }
+      // ※※※ 追加終了 ※※※
+
+      // 馬単・三連単用の順序指定モーダル送信
+      else if (interaction.isModalSubmit() && interaction.customId.startsWith('bet_ordered_normal_')) {
+        await BetHandler.handleOrderedBetSubmit(interaction);
+      }
+
       // フォーメーション馬券のモーダル送信
       else if (interaction.isModalSubmit() && interaction.customId.startsWith('bet_formation_')) {
-        await BetHandler.handleFormationBet(interaction);
+        await BetHandler.handleFormationBetSubmit(interaction);
       }
 
       // races.js からのインタラクション
