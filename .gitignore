@@ -1,4 +1,9 @@
-/node_modules
-/.env
-/serviceAccountKey.json
-/debug
+# node.js依存関係
+node_modules/
+# 環境設定ファイル
+.env
+# Firebase認証ファイル
+serviceAccountKey.json
+# ログファイル
+logs/
+*.log

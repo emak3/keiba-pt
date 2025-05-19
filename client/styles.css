@@ -1,0 +1,508 @@
+/* 全体のスタイル */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Hiragino Kaku Gothic ProN', 'メイリオ', sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background-color: #f4f5f7;
+    padding-bottom: 40px;
+}
+
+header {
+    background-color: #00733e; /* JRAカラー */
+    color: white;
+    padding: 1rem 2rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+header h1 {
+    margin-bottom: 0.5rem;
+}
+
+#last-updated {
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+
+main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+
+footer {
+    text-align: center;
+    padding: 1rem;
+    font-size: 0.85rem;
+    color: #666;
+    background-color: #f0f0f0;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+}
+
+/* タブメニュー（JRA・地方競馬切り替え） */
+.tab-menu {
+    display: flex;
+    margin-bottom: 1.5rem;
+    background-color: #f0f0f0;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.tab-menu .tab-button {
+    flex: 1;
+    padding: 0.75rem;
+    text-align: center;
+    background-color: #f0f0f0;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.2s ease;
+}
+
+.tab-menu .tab-button.active {
+    background-color: #00733e;
+    color: white;
+}
+
+/* セクションのスタイル */
+.selection-container {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.selection-container h2 {
+    border-bottom: 2px solid #00733e;
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+    color: #00733e;
+}
+
+.venue-info, .race-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.back-button {
+    background-color: #f0f0f0;
+    border: 1px solid #ddd;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.back-button:hover {
+    background-color: #e6e6e6;
+}
+
+/* ボタンコンテナとボタン */
+.button-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.venue-button, .race-button {
+    background-color: white;
+    border: 2px solid #00733e;
+    color: #00733e;
+    padding: 0.75rem 1.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.2s ease;
+}
+
+.venue-button:hover, .race-button:hover {
+    background-color: #00733e;
+    color: white;
+}
+
+/* タブのスタイル */
+.tabs {
+    display: flex;
+    border-bottom: 2px solid #ddd;
+    margin-bottom: 1rem;
+}
+
+.tab-button {
+    padding: 0.75rem 1.5rem;
+    background-color: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-weight: bold;
+    margin-bottom: -2px;
+}
+
+.tab-button.active {
+    border-bottom: 2px solid #00733e;
+    color: #00733e;
+}
+
+.tab-button:hover:not(.active) {
+    background-color: #f0f0f0;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* テーブルのスタイル */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+}
+
+.data-table th, .data-table td {
+    border: 1px solid #ddd;
+    padding: 0.6rem 0.4rem;
+    text-align: center;
+}
+
+.data-table th {
+    background-color: #f4f5f7;
+    font-weight: bold;
+}
+
+.data-table tbody tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.data-table tbody tr:hover {
+    background-color: #f0f4f0;
+}
+
+/* 馬番と枠の色 */
+.Waku1 { background-color: #ffffff; }
+.Waku2 { background-color: #444444; color: white; }
+.Waku3 { background-color: #e95556; color: white; }
+.Waku4 { background-color: #416cba; color: white; }
+.Waku5 { background-color: #e7c52c; }
+.Waku6 { background-color: #47c075; }
+.Waku7 { background-color: #f16f41; }
+.Waku8 { background-color: #ee82a0; }
+
+.Umaban1, .Umaban2, .Umaban3, .Umaban4, .Umaban5, .Umaban6, 
+.Umaban7, .Umaban8, .Umaban9, .Umaban10, .Umaban11, .Umaban12,
+.Umaban13, .Umaban14, .Umaban15, .Umaban16, .Umaban17, .Umaban18 {
+    font-weight: bold;
+}
+
+/* 人気順の背景色 */
+.BgYellow { background-color: #fff799; }
+.BgBlue02 { background-color: #b3d4ff; }
+.BgOrange { background-color: #ffdfbf; }
+
+/* 取消・除外馬 */
+.Cancel {
+    background-color: #f0f0f0;
+    color: #999;
+}
+
+.Cancel_Txt {
+    color: #f00;
+    font-weight: bold;
+}
+
+/* ユーティリティクラス */
+.hidden {
+    display: none;
+}
+
+.loading {
+    text-align: center;
+    color: #666;
+    font-style: italic;
+}
+
+.Txt_C {
+    text-align: center;
+}
+
+.Txt_R {
+    text-align: right;
+}
+
+/* レスポンシブデザイン */
+@media (max-width: 1024px) {
+    .data-table {
+        font-size: 0.9rem;
+    }
+    
+    .data-table th, .data-table td {
+        padding: 0.5rem 0.3rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .data-table {
+        font-size: 0.8rem;
+    }
+    
+    .venue-button, .race-button {
+        width: calc(50% - 0.5rem);
+        text-align: center;
+    }
+    
+    .tab-button {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+    
+    /* スマホ向けテーブルスクロール対応 */
+    .tab-content {
+        overflow-x: auto;
+    }
+    
+    #horse-table {
+        min-width: 800px;
+    }
+}
+
+@media (max-width: 480px) {
+    .venue-button, .race-button {
+        width: 100%;
+    }
+    
+    .tab-menu .tab-button {
+        font-size: 0.9rem;
+        padding: 0.6rem 0.5rem;
+    }
+    
+    .tabs {
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+}
+/* 日付選択関連のスタイルを追加 */
+
+/* 日付ピッカーコンテナ */
+.date-picker {
+    background-color: #f9f9f9;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+/* 日付ナビゲーション */
+.date-nav {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.date-nav-button {
+    background-color: #00733e;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.2s;
+}
+
+.date-nav-button:hover {
+    background-color: #005a30;
+}
+
+.date-input {
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
+    text-align: center;
+    width: 160px;
+}
+
+.today-button {
+    display: block;
+    margin: 0 auto;
+    background-color: #005a30;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 0.6rem 1.5rem;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.2s;
+}
+
+.today-button:hover {
+    background-color: #004020;
+}
+
+/* カレンダー */
+.race-calendar {
+    margin-top: 2rem;
+}
+
+.race-calendar h3 {
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.calendar-container {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0.5rem;
+}
+
+.calendar-day {
+    text-align: center;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    position: relative;
+}
+
+.calendar-day.inactive {
+    background-color: #f0f0f0;
+    color: #aaa;
+}
+
+.calendar-day.today {
+    background-color: #e7f4ef;
+    border-color: #00733e;
+    font-weight: bold;
+}
+
+.calendar-day.has-races {
+    background-color: #effae7;
+    border-color: #008000;
+    cursor: pointer;
+}
+
+.calendar-day.has-races:hover {
+    background-color: #d7f5d7;
+}
+
+.calendar-day-number {
+    font-size: 1.1rem;
+    margin-bottom: 0.2rem;
+}
+
+.calendar-day-races {
+    font-size: 0.7rem;
+    color: #00733e;
+}
+
+.calendar-header {
+    font-weight: bold;
+    padding: 0.5rem;
+    text-align: center;
+    background-color: #f4f5f7;
+}
+
+/* 日付別レースコンテナ */
+.venue-races-container {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+}
+
+.venue-races-header {
+    background-color: #00733e;
+    color: white;
+    padding: 0.8rem 1rem;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    cursor: pointer;
+}
+
+.venue-races-header:hover {
+    background-color: #005a30;
+}
+
+.venue-races-toggle {
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+.venue-races-list {
+    padding: 1rem;
+    background-color: #fff;
+}
+
+.venue-race-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.venue-race-item:hover {
+    background-color: #f0f4f0;
+}
+
+.venue-race-item:last-child {
+    border-bottom: none;
+}
+
+.race-number {
+    font-weight: bold;
+    margin-right: 1rem;
+    min-width: 3rem;
+}
+
+.race-name {
+    flex-grow: 1;
+}
+
+.race-time {
+    color: #666;
+    min-width: 5rem;
+    text-align: right;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+    .date-nav {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .calendar-container {
+        grid-template-columns: repeat(7, 1fr);
+        font-size: 0.9rem;
+    }
+    
+    .calendar-day {
+        padding: 0.3rem;
+    }
+    
+    .calendar-day-number {
+        font-size: 0.9rem;
+    }
+    
+    .calendar-day-races {
+        font-size: 0.6rem;
+    }
+}

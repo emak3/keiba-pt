@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>競馬情報サイト</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Firebase SDK の読み込み -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+    <header>
+        <h1>競馬情報サイト</h1>
+        <p id="last-updated">最終更新: 読み込み中...</p>
+    </header>
+
+    <main>
+        <div class="tab-menu">
+            <button class="tab-button active" data-tab="central">JRA中央競馬</button>
+            <button class="tab-button" data-tab="local">地方競馬</button>
+        </div>
+
+        <!-- 日付選択セクション（新規追加） -->
+        <section id="date-selection" class="selection-container">
+            <h2>日付選択</h2>
+            <div class="date-picker">
+                <div class="date-nav">
+                    <button id="prev-date" class="date-nav-button">前日</button>
+                    <input type="date" id="date-input" class="date-input">
+                    <button id="next-date" class="date-nav-button">翌日</button>
+                </div>
+                <button id="today-button" class="today-button">今日のレース</button>
+            </div>
+            
+            <!-- レース日程（カレンダー）セクション -->
+            <div class="race-calendar">
+                <h3>今月のレース日程</h3>
+                <div id="calendar-container" class="calendar-container">
+                    <!-- カレンダーがJSで動的に生成されます -->
+                </div>
+            </div>
+        </section>
+
+        <!-- 日付別レース一覧セクション（新規追加） -->
+        <section id="date-races" class="selection-container hidden">
+            <h2 id="date-races-title">日付のレース一覧</h2>
+            <div class="date-info">
+                <button id="back-to-dates" class="back-button">日付選択に戻る</button>
+            </div>
+            <div id="date-venues-container">
+                <!-- 日付別会場・レース一覧がJSで動的に挿入されます -->
+            </div>
+        </section>
+        
+        <!-- 以下は既存のセクション -->
+        <section id="venue-selection" class="selection-container hidden">
+            <h2>開催会場を選択</h2>
+            <div id="venue-buttons" class="button-container">
+                <!-- 会場ボタンがJSで動的に挿入されます -->
+            </div>
+        </section>
+
+        <section id="race-selection" class="selection-container hidden">
+            <h2>レース選択</h2>
+            <div class="venue-info">
+                <h3 id="selected-venue-name">会場名</h3>
+                <button id="back-to-venues" class="back-button">会場選択に戻る</button>
+            </div>
+            <div id="race-buttons" class="button-container">
+                <!-- レースボタンがJSで動的に挿入されます -->
+            </div>
+        </section>
+
+        <section id="race-details" class="selection-container hidden">
+            <h2>出馬表・オッズ情報</h2>
+            <div class="race-info">
+                <h3 id="race-title">レース名</h3>
+                <p id="race-info-text">レース情報</p>
+                <button id="back-to-races" class="back-button">レース選択に戻る</button>
+            </div>
+            
+            <div class="tabs">
+                <button class="tab-button active" data-tab="entry-table">出馬表</button>
+                <button class="tab-button" data-tab="odds-table">オッズ</button>
+            </div>
+            
+            <div id="entry-table" class="tab-content active">
+                <table id="horse-table" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>枠</th>
+                            <th>馬番</th>
+                            <th>馬名</th>
+                            <th>性齢</th>
+                            <th>斤量</th>
+                            <th>騎手</th>
+                            <th>厩舎</th>
+                            <th>馬体重</th>
+                            <th>単勝</th>
+                            <th>人気</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- 出馬表データがJSで動的に挿入されます -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div id="odds-table" class="tab-content">
+                <h4>単勝・複勝オッズ</h4>
+                <table id="win-place-table" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>馬番</th>
+                            <th>馬名</th>
+                            <th>単勝オッズ</th>
+                            <th>複勝オッズ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- 単勝・複勝オッズデータがJSで動的に挿入されます -->
+                    </tbody>
+                </table>
+                
+                <h4>三連複オッズ (人気順上位10点)</h4>
+                <table id="trio-table" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>組み合わせ</th>
+                            <th>オッズ</th>
+                            <th>人気</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- 三連複オッズデータがJSで動的に挿入されます -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>※データはnetkeibaから30分ごとに更新されています</p>
+        <p>※取得データの無断転載・商用利用はご遠慮ください</p>
+    </footer>
+
+    <!-- JavaScriptの読み込み -->
+    <script src="script.js"></script>
+</body>
+</html>
