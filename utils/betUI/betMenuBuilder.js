@@ -243,12 +243,35 @@ export function createConfirmButton(raceId, betType, method, amount, selectedHor
  */
 export function createConfirmEmbed(race, betType, method, selectedHorses, amount, userPoints, totalCost) {
     // 選択した馬の情報
-    const horseInfos = selectedHorses.map(horseNumber => {
-        const horse = race.horses?.find(h => h.horseNumber === horseNumber);
-        return horse ?
-            `${horseNumber}番: ${horse.horseName} (騎手: ${horse.jockey})` :
-            `${horseNumber}番`;
-    });
+    let horseInfos;
+
+    if (betType === 'wakuren') {
+        // 枠連の場合は、選択された枠番に含まれる馬の情報を表示
+        horseInfos = selectedFrames.map(frameNumber => {
+            const horsesInFrame = race.horses?.filter(h => h.frameNumber === frameNumber && !h.isCanceled);
+            if (horsesInFrame && horsesInFrame.length > 0) {
+                const horseList = horsesInFrame.map(h =>
+                    `${h.horseNumber}番:${h.horseName}`
+                ).join(', ');
+                return `${frameNumber}枠: ${horseList}`;
+            }
+            return `${frameNumber}枠`;
+        });
+    } else {
+        // 通常の馬券は従来通り馬番から情報を取得
+        horseInfos = selectedHorses.map(horseNumber => {
+            const horse = race.horses?.find(h => h.horseNumber === horseNumber);
+            return horse ?
+                `${horseNumber}番: ${horse.horseName} (騎手: ${horse.jockey})` :
+                `${horseNumber}番`;
+        });
+    }
+
+    let combinationInfo = '';
+    if (method === 'box' || method === 'formation') {
+        const combinationCount = Math.round(totalCost / amount);
+        combinationInfo = `\n組み合わせ数: ${combinationCount}通り`;
+    }
     
     return new EmbedBuilder()
         .setTitle(`🏇 馬券購入確認 - ${race.venue} ${race.number}R ${race.name}`)

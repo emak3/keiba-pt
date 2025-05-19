@@ -28,7 +28,7 @@ export async function startFormationBet(interaction, raceId, betType) {
                 components: []
             });
         }
-
+        
         // ユーザー情報を取得
         const user = await getUser(interaction.user.id);
         if (!user) {
@@ -37,16 +37,35 @@ export async function startFormationBet(interaction, raceId, betType) {
                 components: []
             });
         }
-
+        
+        // セッション情報を更新 - タイムスタンプを更新して有効期限をリセット
+        betUtils.updateSession(interaction.user.id, raceId, {
+            method: 'formation',
+            timestamp: Date.now() // 明示的にタイムスタンプを更新
+        });
+        
         // フォーメーション購入用のモーダルを作成
         const modal = betModalBuilder.createFormationModal(
             `bet_formation_${raceId}_${betType}`,
             betType,
             race
         );
-
-        await betUtils.safeShowModal(interaction, modal);
+        
+        // モーダル表示前にインタラクションの状態をログ
+        logger.debug(`モーダル表示前のインタラクション状態: replied=${interaction.replied}, deferred=${interaction.deferred}`);
+        
+        // 安全にモーダルを表示
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.showModal(modal);
+        } else {
+            // すでに応答済みの場合は編集して通知
+            await betUtils.safeUpdateInteraction(interaction, {
+                content: 'フォーメーション購入用のフォームを表示します。もう一度操作してください。',
+                components: []
+            });
+        }
     } catch (error) {
+        logger.error(`フォーメーション購入開始エラー: ${error}`);
         await betUtils.handleError(interaction, error);
     }
 }

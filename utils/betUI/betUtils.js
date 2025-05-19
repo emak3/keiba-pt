@@ -49,14 +49,20 @@ export function getSession(userId, raceId) {
     const sessionKey = `${userId}_${raceId}`;
     const session = global.betSessions[sessionKey];
 
-    // セッションの有効期限チェック (1時間)
-    if (session && session.timestamp) {
-        const now = Date.now();
-        const oneHour = 60 * 60 * 1000;
+    // セッションがない場合はnullを返す
+    if (!session) {
+        return null;
+    }
 
-        if (now - session.timestamp > oneHour) {
+    // セッションの有効期限チェック (30分に短縮)
+    if (session.timestamp) {
+        const now = Date.now();
+        const sessionTimeout = 30 * 60 * 1000; // 30分
+
+        if (now - session.timestamp > sessionTimeout) {
             // 期限切れのセッションを削除
             delete global.betSessions[sessionKey];
+            logger.debug(`セッション期限切れ: ${userId}_${raceId}`);
             return null;
         }
     }
